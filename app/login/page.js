@@ -20,6 +20,15 @@ export default function Login() {
 
     async function handleEmail() {
         setLoading(true)
+
+        // Accés directe a admin
+        if (email === 'admin' && password === 'fantasy-andratx') {
+            sessionStorage.setItem('admin_auth', 'ok')
+            router.push('/admin')
+            setLoading(false)
+            return
+        }
+
         if (esRegistre) {
             const { error } = await supabase.auth.signUp({ email, password })
             if (error) setMissatge(error.message)

@@ -58,11 +58,11 @@ export default function Admin() {
     const router = useRouter()
 
     useEffect(() => {
+        // Comprovar si ja té la sessió admin (via login o PIN)
+        if (typeof window !== 'undefined' && sessionStorage.getItem('admin_auth') === 'ok') {
+            setAdminOk(true)
+        }
         supabase.auth.getUser().then(({ data }) => {
-            if (!data.user || data.user.email !== ADMIN_EMAIL) {
-                router.push('/')
-                return
-            }
             setUser(data.user)
             fetchTot()
         })
@@ -70,6 +70,7 @@ export default function Admin() {
 
     function comprovarPin() {
         if (pinUser === ADMIN_USER && pinPass === ADMIN_PASS) {
+            sessionStorage.setItem('admin_auth', 'ok')
             setAdminOk(true)
             setPinError('')
         } else {
