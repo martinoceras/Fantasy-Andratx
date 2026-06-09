@@ -1,5 +1,6 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
 export default function Login() {
@@ -8,22 +9,33 @@ export default function Login() {
     const [missatge, setMissatge] = useState('')
     const [loading, setLoading] = useState(false)
     const [esRegistre, setEsRegistre] = useState(false)
+    const router = useRouter()
+
+    // Si ja està autenticat, redirigir a la pàgina principal
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            if (data.user) router.push('/')
+        })
+    }, [])
 
     async function handleEmail() {
         setLoading(true)
-        const fn = esRegistre
-            ? supabase.auth.signUp({ email, password })
-            : supabase.auth.signInWithPassword({ email, password })
-        const { error } = await fn
-        if (error) setMissatge(error.message)
-        else setMissatge(esRegistre ? 'Comprova el teu email per confirmar!' : 'Entrant...')
+        if (esRegistre) {
+            const { error } = await supabase.auth.signUp({ email, password })
+            if (error) setMissatge(error.message)
+            else setMissatge('Comprova el teu email per confirmar!')
+        } else {
+            const { error } = await supabase.auth.signInWithPassword({ email, password })
+            if (error) setMissatge('Email o contrasenya incorrectes')
+            else router.push('/')
+        }
         setLoading(false)
     }
 
     async function handleGoogle() {
         await supabase.auth.signInWithOAuth({
             provider: 'google',
-            options: { redirectTo: window.location.origin + '/draft' }
+            options: { redirectTo: window.location.origin + '/' }
         })
     }
 

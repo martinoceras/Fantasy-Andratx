@@ -3,9 +3,16 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
-const ADMIN_EMAIL = 'martinoceras@gmail.com'
+const ADMIN_EMAIL   = 'martinoceras@gmail.com'
+const ADMIN_USER    = 'admin'
+const ADMIN_PASS    = 'fantasy-andratx'
 
 export default function Admin() {
+    // ── Autenticació admin local ─────────────────────────────────────
+    const [pinUser, setPinUser]       = useState('')
+    const [pinPass, setPinPass]       = useState('')
+    const [pinError, setPinError]     = useState('')
+    const [adminOk, setAdminOk]       = useState(false)
     const [participants, setParticipants] = useState([])
     const [draft, setDraft] = useState(null)
     const [ordre, setOrdre] = useState([])
@@ -60,6 +67,15 @@ export default function Admin() {
             fetchTot()
         })
     }, [])
+
+    function comprovarPin() {
+        if (pinUser === ADMIN_USER && pinPass === ADMIN_PASS) {
+            setAdminOk(true)
+            setPinError('')
+        } else {
+            setPinError('Usuari o contrasenya incorrectes')
+        }
+    }
 
     async function fetchTot() {
         const { data: perfils } = await supabase.from('profiles').select('id, nom, email')
@@ -305,6 +321,41 @@ export default function Admin() {
 
     if (loading) return (
         <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">Carregant...</div>
+    )
+
+    // ── Pantalla de PIN admin ────────────────────────────────────────
+    if (!adminOk) return (
+        <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-4">
+            <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-full max-w-sm">
+                <div className="text-center mb-6">
+                    <div className="text-4xl mb-3">🔐</div>
+                    <h1 className="text-2xl font-bold text-green-400">Panell d&apos;Admin</h1>
+                    <p className="text-gray-500 text-sm mt-1">Accés restringit</p>
+                </div>
+                <input
+                    type="text"
+                    placeholder="Usuari"
+                    value={pinUser}
+                    onChange={e => setPinUser(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+                    autoComplete="off"
+                />
+                <input
+                    type="password"
+                    placeholder="Contrasenya"
+                    value={pinPass}
+                    onChange={e => setPinPass(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && comprovarPin()}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-4 text-white placeholder-gray-500 focus:outline-none focus:border-green-500"
+                />
+                {pinError && <p className="text-red-400 text-sm text-center mb-3">{pinError}</p>}
+                <button
+                    onClick={comprovarPin}
+                    className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition">
+                    Entrar
+                </button>
+            </div>
+        </div>
     )
 
     const noAfegits = participants.filter(p => !ordre.includes(p.id))
