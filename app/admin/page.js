@@ -40,10 +40,6 @@ export default function Admin() {
     const [sincronitzant, setSincronitzant] = useState(false)
     const [missatgeSync, setMissatgeSync] = useState('')
 
-    // Secció fotos
-    const [omplintFotos, setOmplintFotos] = useState(false)
-    const [missatgeFotos, setMissatgeFotos] = useState('')
-
     // Secció canvis
     const [iniciantCanvis, setIniciantCanvis] = useState(false)
     const [missatgeCanvis, setMissatgeCanvis] = useState('')
@@ -211,25 +207,6 @@ export default function Admin() {
         const mapa = {}
         data?.forEach(p => { mapa[p.player_id] = p.punts })
         setPuntsMapa(mapa)
-    }
-
-    async function omplirFotosJugadors() {
-        setOmplintFotos(true)
-        setMissatgeFotos('')
-        try {
-            const res = await fetch('/api/fill-photos', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ secret: process.env.NEXT_PUBLIC_SYNC_SECRET || '' })
-            })
-            const data = await res.json()
-            if (data.error) setMissatgeFotos('❌ Error: ' + data.error)
-            else setMissatgeFotos(`✓ ${data.message}`)
-        } catch (e) {
-            setMissatgeFotos('❌ Error de connexió: ' + e.message)
-        }
-        setOmplintFotos(false)
-        setTimeout(() => setMissatgeFotos(''), 8000)
     }
 
     async function sincronitzarJugadors() {
@@ -773,43 +750,6 @@ export default function Admin() {
                             </ul>
                         </div>
 
-                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-4">
-                            <h2 className="text-white font-semibold text-lg mb-2">🖼️ Omplir fotos que falten</h2>
-                            <p className="text-gray-400 text-sm mb-1">
-                                Cerca a Biwenger les fotos dels jugadors que encara no en tenen i les desa a la base de dades.
-                            </p>
-                            <p className="text-gray-500 text-xs mb-5">
-                                Usa <span className="font-mono text-green-400">iconHero</span> i, si no existeix,{' '}
-                                <span className="font-mono text-green-400">icon</span> com a alternativa.
-                            </p>
-
-                            {missatgeFotos && (
-                                <div className={`border px-4 py-3 rounded-lg mb-4 text-sm ${missatgeFotos.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
-                                    {missatgeFotos}
-                                </div>
-                            )}
-
-                            <button
-                                onClick={omplirFotosJugadors}
-                                disabled={omplintFotos}
-                                className="w-full bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition flex items-center justify-center gap-2">
-                                {omplintFotos ? (
-                                    <><span className="animate-spin">⟳</span> Buscant fotos...</>
-                                ) : (
-                                    '🖼️ Omplir fotos que falten'
-                                )}
-                            </button>
-                        </div>
-
-                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-                            <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-2">Com funciona</p>
-                            <ul className="text-gray-400 text-sm space-y-1.5">
-                                <li>🔍 Detecta tots els jugadors a Supabase sense camp <span className="font-mono text-green-400">foto</span></li>
-                                <li>📥 Descarrega les dades de Biwenger per trobar les imatges</li>
-                                <li>🖼️ Prova <span className="font-mono text-green-400">iconHero</span> i, si no, <span className="font-mono text-green-400">icon</span></li>
-                                <li>💾 Actualitza només els jugadors afectats a Supabase</li>
-                            </ul>
-                        </div>
                     </div>
                 )}
 
