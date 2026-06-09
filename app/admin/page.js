@@ -364,8 +364,18 @@ export default function Admin() {
     return (
         <main className="min-h-screen bg-gray-950 text-white p-8">
             <div className="max-w-2xl mx-auto">
-                <h1 className="text-3xl font-bold text-green-400 mb-2">⚙️ Panell d&apos;Admin</h1>
-                <p className="text-gray-400 mb-6">Benvingut, {user?.email}</p>
+                <div className="flex items-center justify-between mb-2">
+                    <h1 className="text-3xl font-bold text-green-400">⚙️ Panell d&apos;Admin</h1>
+                    <button
+                        onClick={() => {
+                            sessionStorage.removeItem('admin_auth')
+                            router.push('/login')
+                        }}
+                        className="text-gray-500 hover:text-white text-sm border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+                        🚪 Tancar sessió
+                    </button>
+                </div>
+                <p className="text-gray-400 mb-6">Benvingut, {user?.email || 'Admin'}</p>
 
                 {missatge && (
                     <div className={`border px-4 py-3 rounded-lg mb-6 ${missatge.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
