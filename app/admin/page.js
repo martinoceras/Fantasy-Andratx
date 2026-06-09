@@ -44,6 +44,14 @@ export default function Admin() {
     const [iniciantCanvis, setIniciantCanvis] = useState(false)
     const [missatgeCanvis, setMissatgeCanvis] = useState('')
 
+    // Secció classificació arxivada
+    const [classificacionsArxivades, setClassificacionsArxivades] = useState([])
+    const [nomVolta, setNomVolta]             = useState('1a Volta')
+    const [jornadaFinalVolta, setJornadaFinalVolta] = useState(19)
+    const [guardantClass, setGuardantClass]   = useState(false)
+    const [reiniciantPunts, setReiniciantPunts] = useState(false)
+    const [missatgeClass, setMissatgeClass]   = useState('')
+
     // Gestió picks draft (desfer / canviar jugador)
     const [picksDraft, setPicksDraft]           = useState([])
     const [missatgeDraft, setMissatgeDraft]     = useState('')
@@ -78,6 +86,7 @@ export default function Admin() {
         const { data: perfils } = await supabase.from('profiles').select('id, nom, email')
         const { data: draftData } = await supabase.from('drafts').select('*').single()
         const { data: playersData } = await supabase.from('players').select('id, nombre, posicion').order('posicion').order('nombre')
+        const { data: classData } = await supabase.from('classificacio_arxivada').select('*').order('created_at', { ascending: false })
         setParticipants(perfils || [])
         setDraft(draftData)
         setOrdre(draftData?.ordre_participants || [])
@@ -85,8 +94,68 @@ export default function Admin() {
         setMaxJugadorsEquip(draftData?.max_jugadors_equip || 4)
         setPlayers(playersData || [])
         setAllPlayers(playersData || [])
+        setClassificacionsArxivades(classData || [])
         await carregarPicksDraft()
         setLoading(false)
+    }
+
+    async function calcularClassificacioActual(perfils) {
+        const { data: allPunts } = await supabase.from('player_punts').select('player_id, punts')
+        const { data: teams }    = await supabase.from('teams').select('user_id, alineacio')
+        const puntsMapa = {}
+        allPunts?.forEach(p => { puntsMapa[p.player_id] = (puntsMapa[p.player_id] || 0) + Number(p.punts) })
+        return (perfils || []).map(perf => {
+            const team = teams?.find(t => t.user_id === perf.id)
+            const alineacio = team?.alineacio || {}
+            const total = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
+            return { user_id: perf.id, nom: perf.nom || perf.email, punts: total }
+        }).sort((a, b) => b.punts - a.punts).map((u, i) => ({ ...u, posicio: i + 1 }))
+    }
+
+    async function guardarClassificacioIReinicisar() {
+        if (!confirm(`Segur que vols guardar la classificació de "${nomVolta}" i REINICIAR tots els punts a 0? Aquesta acció no es pot desfer.`)) return
+        setGuardantClass(true)
+        setMissatgeClass('')
+        try {
+            // 1. Calcular classificació actual
+            const { data: perfils } = await supabase.from('profiles').select('id, nom, email')
+            const classActual = await calcularClassificacioActual(perfils)
+
+            // 2. Guardar a classificacio_arxivada
+            const { error: errGuardar } = await supabase.from('classificacio_arxivada').insert({
+                nom: nomVolta,
+                jornada_final: jornadaFinalVolta,
+                classificacio: classActual,
+            })
+            if (errGuardar) throw new Error(errGuardar.message)
+
+            // 3. Reiniciar tots els punts (eliminar tots els player_punts)
+            const { error: errDelete } = await supabase.from('player_punts').delete().neq('id', 0)
+            if (errDelete) throw new Error(errDelete.message)
+
+            setMissatgeClass(`✅ Classificació "${nomVolta}" guardada i punts reiniciats a 0!`)
+            await fetchTot()
+        } catch (e) {
+            setMissatgeClass('❌ Error: ' + e.message)
+        }
+        setGuardantClass(false)
+        setTimeout(() => setMissatgeClass(''), 6000)
+    }
+
+    async function nomesReiniciarPunts() {
+        if (!confirm('Segur que vols reiniciar TOTS els punts a 0 sense guardar la classificació?')) return
+        setReiniciantPunts(true)
+        const { error } = await supabase.from('player_punts').delete().neq('id', 0)
+        if (error) setMissatgeClass('❌ Error: ' + error.message)
+        else setMissatgeClass('✅ Punts reiniciats a 0!')
+        setReiniciantPunts(false)
+        setTimeout(() => setMissatgeClass(''), 4000)
+    }
+
+    async function eliminarClassificacioArxivada(id, nom) {
+        if (!confirm(`Eliminar la classificació "${nom}"?`)) return
+        await supabase.from('classificacio_arxivada').delete().eq('id', id)
+        await fetchTot()
     }
 
     async function carregarPicksDraft() {
@@ -362,10 +431,10 @@ export default function Admin() {
 
                 {/* Navegació seccions */}
                 <div className="flex gap-2 mb-8 flex-wrap">
-                    {['draft', 'opcions', 'usuaris', 'punts', 'sync', 'canvis'].map(s => (
+                    {['draft', 'opcions', 'usuaris', 'punts', 'sync', 'canvis', 'classificacio'].map(s => (
                         <button key={s} onClick={() => { setSeccio(s); if (s === 'punts') carregarPuntsJornada(jornadaPunts) }}
                                 className={`px-4 py-2 rounded-lg text-sm font-medium transition capitalize ${seccio === s ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-                            {s === 'draft' ? '⚽ Draft' : s === 'opcions' ? '⚙️ Opcions' : s === 'usuaris' ? '👥 Usuaris' : s === 'punts' ? '📊 Punts' : s === 'sync' ? '🔄 Jugadors' : '↔️ Canvis'}
+                            {s === 'draft' ? '⚽ Draft' : s === 'opcions' ? '⚙️ Opcions' : s === 'usuaris' ? '👥 Usuaris' : s === 'punts' ? '📊 Punts' : s === 'sync' ? '🔄 Jugadors' : s === 'canvis' ? '↔️ Canvis' : '🏆 Classificació'}
                         </button>
                     ))}
                 </div>
@@ -778,6 +847,103 @@ export default function Admin() {
                                 className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition">
                                 {iniciantCanvis ? '⏳ Calculant ordre...' : '🔄 Iniciar ronda de canvis'}
                             </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* SECCIÓ CLASSIFICACIÓ ARXIVADA */}
+                {seccio === 'classificacio' && (
+                    <div className="space-y-5">
+
+                        {missatgeClass && (
+                            <div className={`border px-4 py-3 rounded-xl text-sm font-medium ${missatgeClass.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
+                                {missatgeClass}
+                            </div>
+                        )}
+
+                        {/* Guardar i reiniciar */}
+                        <div className="bg-gray-900 border border-orange-700/50 rounded-xl p-6">
+                            <h2 className="text-white font-bold text-lg mb-1">💾 Guardar classificació i reiniciar punts</h2>
+                            <p className="text-gray-400 text-sm mb-4">
+                                Guarda una instantània de la classificació actual i reinicia tots els punts a 0 per a la nova volta.
+                            </p>
+                            <div className="flex gap-3 mb-3 flex-wrap">
+                                <div className="flex-1 min-w-40">
+                                    <label className="text-gray-500 text-xs block mb-1">Nom de la volta</label>
+                                    <input
+                                        type="text"
+                                        value={nomVolta}
+                                        onChange={e => setNomVolta(e.target.value)}
+                                        placeholder="Ex: 1a Volta 2025-26"
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-gray-500 text-xs block mb-1">Jornada final</label>
+                                    <input
+                                        type="number"
+                                        value={jornadaFinalVolta}
+                                        onChange={e => setJornadaFinalVolta(Number(e.target.value))}
+                                        min="1" max="38"
+                                        className="w-24 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500"
+                                    />
+                                </div>
+                            </div>
+                            <button
+                                onClick={guardarClassificacioIReinicisar}
+                                disabled={guardantClass || !nomVolta}
+                                className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm transition mb-2">
+                                {guardantClass ? '⏳ Guardant i reiniciant...' : '💾 Guardar classificació i reiniciar punts a 0'}
+                            </button>
+                            <button
+                                onClick={nomesReiniciarPunts}
+                                disabled={reiniciantPunts}
+                                className="w-full bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-300 py-2 rounded-xl text-sm transition border border-red-700">
+                                {reiniciantPunts ? '⏳ Reiniciant...' : '🗑️ Reiniciar punts sense guardar classificació'}
+                            </button>
+                        </div>
+
+                        {/* Historial de classificacions arxivades */}
+                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+                            <h2 className="text-white font-bold text-lg mb-4">📋 Classificacions arxivades ({classificacionsArxivades.length})</h2>
+                            {classificacionsArxivades.length === 0 ? (
+                                <p className="text-gray-600 text-sm text-center py-4">Encara no hi ha classificacions guardades.</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    {classificacionsArxivades.map(c => (
+                                        <div key={c.id} className="bg-gray-800 rounded-xl p-4">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div>
+                                                    <p className="text-white font-bold">{c.nom}</p>
+                                                    <p className="text-gray-500 text-xs">
+                                                        Fins a jornada {c.jornada_final} · {new Date(c.created_at).toLocaleDateString('ca-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => eliminarClassificacioArxivada(c.id, c.nom)}
+                                                    className="text-red-500 hover:text-red-400 text-xs border border-red-800 hover:border-red-600 px-2 py-1 rounded transition">
+                                                    Eliminar
+                                                </button>
+                                            </div>
+                                            <div className="space-y-1">
+                                                {(c.classificacio || []).map(u => (
+                                                    <div key={u.user_id} className="flex items-center gap-3 px-2 py-1 rounded-lg bg-gray-900/50">
+                                                        <span className={`text-xs font-bold w-6 text-center flex-shrink-0 ${
+                                                            u.posicio === 1 ? 'text-yellow-400' :
+                                                            u.posicio === 2 ? 'text-gray-300' :
+                                                            u.posicio === 3 ? 'text-orange-400' : 'text-gray-600'
+                                                        }`}>
+                                                            {u.posicio === 1 ? '🥇' : u.posicio === 2 ? '🥈' : u.posicio === 3 ? '🥉' : `#${u.posicio}`}
+                                                        </span>
+                                                        <span className="text-white text-sm flex-1">{u.nom}</span>
+                                                        <span className="text-yellow-400 font-bold text-sm">{u.punts} pts</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
