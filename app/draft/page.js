@@ -23,8 +23,9 @@ export default function Draft() {
     const [cerca, setCerca]               = useState('')
     const [posicioFiltro, setPosicioFiltro] = useState('Tots')
     const [ordenar, setOrdenar]           = useState('posicio')  // 'posicio' | 'preu' | 'punts'
-    const [jugadorPreSel, setJugadorPreSel] = useState(null)  // jugador pre-seleccionat pendent confirmar
-    const [confirmant, setConfirmant]       = useState(false)  // estat loading del confirm
+    const [jugadorPreSel, setJugadorPreSel] = useState(null)
+    const [confirmant, setConfirmant]       = useState(false)
+    const [puntsByPlayer, setPuntsByPlayer] = useState({})     // {playerId: [{jornada, punts}]} — darreres 5
     const router = useRouter()
 
     useEffect(() => {
@@ -56,13 +57,28 @@ export default function Draft() {
     }
 
     async function fetchTot(userId) {
-        await Promise.all([fetchPlayers(), fetchPicks(userId), fetchDraft(), fetchParticipants()])
+        await Promise.all([fetchPlayers(), fetchPicks(userId), fetchDraft(), fetchParticipants(), fetchPuntsJornades()])
         setLoading(false)
     }
 
     async function fetchPlayers() {
         const { data } = await supabase.from('players').select('*').order('posicion').order('nombre')
         setPlayers(data || [])
+    }
+
+    async function fetchPuntsJornades() {
+        const { data } = await supabase
+            .from('player_punts')
+            .select('player_id, jornada, punts')
+            .order('jornada', { ascending: false })
+        const mapa = {}
+        data?.forEach(p => {
+            if (!mapa[p.player_id]) mapa[p.player_id] = []
+            if (mapa[p.player_id].length < 5) mapa[p.player_id].push({ jornada: p.jornada, punts: p.punts })
+        })
+        // Mostrar de més antiga a més recent
+        Object.keys(mapa).forEach(k => { mapa[k] = mapa[k].reverse() })
+        setPuntsByPlayer(mapa)
     }
 
     async function fetchPicks(userId) {
@@ -93,12 +109,25 @@ export default function Draft() {
 
     async function pickPlayer(playerId) {
         if (!user || !draft || !esMeuTorn) return
-        // Validació límit equip real
         const playerData = players.find(p => p.id === playerId)
+
+        // Validació límit equip real
         if (playerData && maxEquip < 999) {
             const comptActual = meusDeEquipReal(playerData.equipo_real)
             if (comptActual >= maxEquip) {
                 alert(`Ja tens ${comptActual} jugadors de ${playerData.equipo_real}. Màxim permès: ${maxEquip}`)
+                setJugadorPreSel(null)
+                setConfirmant(false)
+                return
+            }
+        }
+
+        // Validació límit per posició
+        if (playerData) {
+            const maxPos   = LIMIT_POSICIO[playerData.posicion] ?? 99
+            const comptPos = meusDePos(playerData.posicion)
+            if (comptPos >= maxPos) {
+                alert(`Ja tens ${comptPos} ${playerData.posicion}s. Màxim permès: ${maxPos}`)
                 setJugadorPreSel(null)
                 setConfirmant(false)
                 return
@@ -175,11 +204,22 @@ export default function Draft() {
     // Filtre jugadors
     const maxEquip = draft?.max_jugadors_equip || 999  // límit per equip real
 
+    // Límits per posició (fixes de la lliga)
+    const LIMIT_POSICIO = { Porter: 2, Defensa: 6, Migcampista: 6, Davanter: 4 }
+
     // Compte quants jugadors meus hi ha per cada equip real
     function meusDeEquipReal(equipReal) {
         return meusPicks.filter(pid => {
             const p = players.find(pl => pl.id === pid)
             return p?.equipo_real === equipReal
+        }).length
+    }
+
+    // Compte quants jugadors meus per posició
+    function meusDePos(posicio) {
+        return meusPicks.filter(pid => {
+            const p = players.find(pl => pl.id === pid)
+            return p?.posicion === posicio
         }).length
     }
 
@@ -197,19 +237,30 @@ export default function Draft() {
             return 0  // 'posicio': l'agrupació ja gestiona l'ordre
         })
 
+    // ── Format preu ─────────────────────────────────────────────────
+    function formatPreu(precio) {
+        if (!precio) return '—'
+        if (precio >= 1_000_000) return (precio / 1_000_000).toFixed(1) + 'M'
+        if (precio >= 1_000)     return Math.round(precio / 1_000) + 'K'
+        return precio.toString()
+    }
+
     // ── Targeta jugador reutilitzable ────────────────────────────────
-    function renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, pot, colors }) {
+    function renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, limitPosicio, pot, colors }) {
+        const jornadesJugador = puntsByPlayer[player.id] || []
+        const maxPos = LIMIT_POSICIO[player.posicion] ?? 99
+        const comptPos = meusDePos(player.posicion)
         return (
             <button
                 key={player.id}
                 onClick={() => pot && setJugadorPreSel(jugadorPreSel?.id === player.id ? null : player)}
-                disabled={agafat || !esMeuTorn || limitEquip}
+                disabled={agafat || !esMeuTorn || limitEquip || limitPosicio}
                 className={`p-3 rounded-xl text-left transition border relative overflow-hidden w-full
                     ${meu
                         ? 'bg-green-900/60 border-green-500'
                         : agafat
                             ? 'bg-gray-900 border-gray-800 opacity-50 cursor-not-allowed'
-                            : limitEquip
+                            : limitEquip || limitPosicio
                                 ? 'bg-orange-950/40 border-orange-900 opacity-60 cursor-not-allowed'
                                 : jugadorPreSel?.id === player.id
                                     ? 'bg-green-700/60 border-green-400 ring-2 ring-green-400 scale-[1.02]'
@@ -220,23 +271,26 @@ export default function Draft() {
             >
                 {/* Foto + nom + equip */}
                 <div className="flex items-center gap-3 mb-2">
-                    {player.foto ? (
-                        <img
-                            src={player.foto}
-                            alt={player.nombre}
-                            className="w-12 h-12 rounded-full object-cover flex-shrink-0 bg-gray-700"
-                            onError={e => { e.target.style.display = 'none' }}
-                        />
-                    ) : (
-                        <div className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold ${colors.bg} ${colors.text}`}>
+                    {/* Foto jugador: fallback inicial si la imatge no carrega */}
+                    <div className="relative w-12 h-12 flex-shrink-0">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold ${colors.bg} ${colors.text}`}>
                             {player.nombre?.charAt(0)}
                         </div>
-                    )}
+                        {player.foto && (
+                            <img
+                                src={player.foto}
+                                alt={player.nombre}
+                                className="w-12 h-12 rounded-full object-cover absolute inset-0"
+                                onError={e => { e.target.style.display = 'none' }}
+                            />
+                        )}
+                    </div>
                     <div className="min-w-0 flex-1">
                         <div className="font-bold text-sm text-white truncate">{player.nombre}</div>
                         <div className="flex items-center gap-1 text-gray-400 text-xs truncate">
                             {player.escudo_equip && (
-                                <img src={player.escudo_equip} alt="" className="w-4 h-4 object-contain flex-shrink-0"
+                                <img src={player.escudo_equip} alt=""
+                                     className="w-4 h-4 object-contain flex-shrink-0"
                                      onError={e => { e.target.style.display = 'none' }} />
                             )}
                             {player.equipo_real}
@@ -245,18 +299,14 @@ export default function Draft() {
                 </div>
 
                 {/* Preu i punts */}
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-2">
                     <div className="text-center">
-                        <div className="text-green-400 font-bold text-sm">
-                            {player.precio ? (player.precio / 1_000_000).toFixed(1) + 'M' : '—'}
-                        </div>
+                        <div className="text-green-400 font-bold text-sm">{formatPreu(player.precio)}</div>
                         <div className="text-gray-600 text-[9px] uppercase">Preu</div>
                     </div>
                     <div className="w-px h-6 bg-gray-700" />
                     <div className="text-center">
-                        <div className="text-yellow-400 font-bold text-sm">
-                            {player.punts_totals || 0}
-                        </div>
+                        <div className="text-yellow-400 font-bold text-sm">{player.punts_totals || 0}</div>
                         <div className="text-gray-600 text-[9px] uppercase">Punts</div>
                     </div>
                     <div className="w-px h-6 bg-gray-700" />
@@ -267,11 +317,36 @@ export default function Draft() {
                     </div>
                 </div>
 
+                {/* Darreres 5 jornades */}
+                {jornadesJugador.length > 0 && (
+                    <div className="border-t border-gray-700/50 pt-2">
+                        <div className="text-gray-600 text-[8px] uppercase tracking-wider mb-1">Darreres jornades</div>
+                        <div className="flex gap-1">
+                            {jornadesJugador.map(({ jornada, punts: p }) => (
+                                <div key={jornada} className="flex-1 text-center bg-gray-900/60 rounded py-0.5">
+                                    <div className={`text-[11px] font-bold leading-tight ${
+                                        p >= 8  ? 'text-green-400' :
+                                        p >= 4  ? 'text-yellow-400' :
+                                        p > 0   ? 'text-gray-300' :
+                                        p < 0   ? 'text-red-400' : 'text-gray-600'
+                                    }`}>{p}</div>
+                                    <div className="text-gray-700 text-[7px]">J{jornada}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {/* Estat */}
                 {meu && <div className="mt-2 text-[10px] font-bold text-green-400">✓ El teu</div>}
                 {agafat && !meu && <div className="mt-2 text-[10px] text-gray-400 truncate">👤 {owner}</div>}
-                {limitEquip && !agafat && <div className="mt-2 text-[10px] text-orange-400">🚫 Límit {comptEquip}/{maxEquip}</div>}
-                {!agafat && !limitEquip && esMeuTorn && comptEquip > 0 && (
+                {limitPosicio && !agafat && !meu && (
+                    <div className="mt-2 text-[10px] text-orange-400">🚫 Màx. {maxPos} {player.posicion}s ({comptPos}/{maxPos})</div>
+                )}
+                {limitEquip && !agafat && !limitPosicio && (
+                    <div className="mt-2 text-[10px] text-orange-400">🚫 Límit {comptEquip}/{maxEquip} de l&apos;equip</div>
+                )}
+                {!agafat && !limitEquip && !limitPosicio && esMeuTorn && comptEquip > 0 && (
                     <div className="mt-2 text-[10px] text-gray-500">{comptEquip}/{maxEquip} d&apos;aquest equip</div>
                 )}
                 {pot && jugadorPreSel?.id !== player.id && (
@@ -334,7 +409,32 @@ export default function Draft() {
                                 {/* ── ESQUERRA: Jugadors ── */}
                                 <div className="flex-1 min-w-0">
 
-                                    {/* Barra cerca + filtres + ordenació */}
+                                    {/* ── Comptador posicions del meu equip ── */}
+                                {meusPicks.length > 0 && (
+                                    <div className="flex gap-2 mb-3">
+                                        {posicions.map(pos => {
+                                            const actual  = meusDePos(pos)
+                                            const max     = LIMIT_POSICIO[pos]
+                                            const ple     = actual >= max
+                                            const colors  = POS_COLORS[pos]
+                                            return (
+                                                <div key={pos} className={`flex-1 text-center rounded-lg py-1.5 border transition ${
+                                                    ple ? 'bg-red-900/40 border-red-600' : actual > 0 ? `border-gray-600 bg-gray-800` : 'border-gray-700 bg-gray-900'
+                                                }`}>
+                                                    <div className={`text-sm font-bold ${ple ? 'text-red-400' : actual > 0 ? 'text-white' : 'text-gray-600'}`}>
+                                                        {actual}<span className="text-gray-600 text-xs">/{max}</span>
+                                                    </div>
+                                                    <div className={`text-[9px] font-semibold ${colors.bg.replace('bg-','text-').replace('-500','-400').replace('-400','-400')}`}>
+                                                        {pos.slice(0,3).toUpperCase()}
+                                                    </div>
+                                                    {ple && <div className="text-[8px] text-red-500 leading-tight">MÀXIM</div>}
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Barra cerca + filtres + ordenació */}
                                     <div className="flex flex-col gap-2 mb-4">
                                         <input
                                             type="text"
@@ -383,14 +483,15 @@ export default function Draft() {
                                         /* Vista plana ordenada per preu o punts */
                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                                             {jugadorsFiltrats.map(player => {
-                                                const agafat    = picks.includes(player.id)
-                                                const meu       = meusPicks.includes(player.id)
-                                                const owner     = agafat ? propietari(player.id) : null
+                                                const agafat     = picks.includes(player.id)
+                                                const meu        = meusPicks.includes(player.id)
+                                                const owner      = agafat ? propietari(player.id) : null
                                                 const comptEquip = meusDeEquipReal(player.equipo_real)
                                                 const limitEquip = !meu && comptEquip >= maxEquip
-                                                const pot       = esMeuTorn && !agafat && !limitEquip
-                                                const colors    = POS_COLORS[player.posicion]
-                                                return renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, pot, colors })
+                                                const limitPosicio = !meu && meusDePos(player.posicion) >= (LIMIT_POSICIO[player.posicion] ?? 99)
+                                                const pot        = esMeuTorn && !agafat && !limitEquip && !limitPosicio
+                                                const colors     = POS_COLORS[player.posicion]
+                                                return renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, limitPosicio, pot, colors })
                                             })}
                                         </div>
                                     ) : (
@@ -400,23 +501,31 @@ export default function Draft() {
                                                 const del = jugadorsFiltrats.filter(p => p.posicion === pos)
                                                 if (!del.length) return null
                                                 const colors = POS_COLORS[pos]
+                                                const comptActualPos = meusDePos(pos)
+                                                const maxPosActual   = LIMIT_POSICIO[pos] ?? 99
+                                                const posPlena       = comptActualPos >= maxPosActual
                                                 return (
                                                     <div key={pos}>
                                                         <div className="flex items-center gap-2 mb-3">
                                                             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${colors.bg} ${colors.text}`}>
                                                                 {pos.toUpperCase()}
                                                             </span>
-                                                            <span className="text-gray-500 text-xs">{del.length} jugadors</span>
+                                                            <span className="text-gray-500 text-xs">{del.length} disponibles</span>
+                                                            {/* Comptador de la posició */}
+                                                            <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${posPlena ? 'bg-red-900 text-red-300' : 'bg-gray-800 text-gray-300'}`}>
+                                                                {posPlena ? '🚫 ' : ''}{comptActualPos}/{maxPosActual} teus
+                                                            </span>
                                                         </div>
                                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                                                             {del.map(player => {
-                                                                const agafat    = picks.includes(player.id)
-                                                                const meu       = meusPicks.includes(player.id)
-                                                                const owner     = agafat ? propietari(player.id) : null
+                                                                const agafat     = picks.includes(player.id)
+                                                                const meu        = meusPicks.includes(player.id)
+                                                                const owner      = agafat ? propietari(player.id) : null
                                                                 const comptEquip = meusDeEquipReal(player.equipo_real)
-                                                                const limitEquip = !meu && comptEquip >= maxEquip
-                                                                const pot       = esMeuTorn && !agafat && !limitEquip
-                                                                return renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, pot, colors })
+                                                                const limitEquip  = !meu && comptEquip >= maxEquip
+                                                                const limitPosicio = !meu && comptActualPos >= maxPosActual
+                                                                const pot        = esMeuTorn && !agafat && !limitEquip && !limitPosicio
+                                                                return renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, limitPosicio, pot, colors })
                                                             })}
                                                         </div>
                                                     </div>

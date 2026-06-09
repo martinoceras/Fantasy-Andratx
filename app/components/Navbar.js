@@ -18,6 +18,7 @@ export default function Navbar() {
         { href: '/draft',         label: '⚽ Draft' },
         { href: '/equip',         label: '👤 El meu equip' },
         { href: '/canvis',        label: '🔄 Canvis' },
+        { href: '/canvi-bomba',   label: '💣 Canvi BOMBA' },
     ]
 
     return (
