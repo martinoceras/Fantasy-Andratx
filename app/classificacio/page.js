@@ -165,15 +165,24 @@ export default function Classificacio() {
     useEffect(() => {
         let actiu = true
         async function loadRanking() {
-            const { data: picks } = await supabase.from('draft_picks').select('user_id')
-            const { data: perfils } = await supabase.from('profiles').select('id, nom, email')
+            const [{ data: punts }, { data: teams }, { data: perfils }] = await Promise.all([
+                supabase.from('player_punts').select('player_id, punts'),
+                supabase.from('teams').select('user_id, alineacio'),
+                supabase.from('profiles').select('id, nom, email'),
+            ])
             if (!actiu) return
-            if (!picks) { setLoading(false); return }
-            const comptador = {}
-            picks.forEach(pick => { comptador[pick.user_id] = (comptador[pick.user_id] || 0) + 1 })
-            const llista = Object.entries(comptador).map(([userId, total]) => {
-                const perfil = perfils?.find(p => p.id === userId)
-                return { userId, total, nom: perfil?.nom || perfil?.email || userId.slice(0, 8) + '...' }
+            const puntsMapa = {}
+            punts?.forEach(p => { puntsMapa[p.player_id] = (puntsMapa[p.player_id] || 0) + Number(p.punts) })
+
+            const llista = (perfils || []).map(perfil => {
+                const team = teams?.find(t => t.user_id === perfil.id)
+                const alineacio = team?.alineacio || {}
+                const total = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
+                return {
+                    userId: perfil.id,
+                    total,
+                    nom: perfil.nom || perfil.email || perfil.id.slice(0, 8) + '...'
+                }
             }).sort((a, b) => b.total - a.total)
             setRanking(llista)
             setLoading(false)
@@ -203,11 +212,11 @@ export default function Classificacio() {
             punts?.forEach(p => { mapa[p.player_id] = Number(p.punts) })
             setPuntsByPlayer(mapa)
 
-            const calc = (teams || []).map(team => {
-                const alineacio = team.alineacio || {}
+            const calc = (perfils || []).map(perfil => {
+                const team = teams?.find(t => t.user_id === perfil.id)
+                const alineacio = team?.alineacio || {}
                 const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (mapa[pid] || 0), 0)
-                const perfil = perfils?.find(p => p.id === team.user_id)
-                return { userId: team.user_id, nom: perfil?.nom || perfil?.email || '...', punts: totalPunts }
+                return { userId: perfil.id, nom: perfil.nom || perfil.email || '...', punts: totalPunts }
             }).sort((a, b) => b.punts - a.punts)
 
             setRankingJornadaActual(calc)
@@ -231,14 +240,13 @@ export default function Classificacio() {
                 supabase.from('profiles').select('id, nom, email'),
             ])
             if (!actiu) return
-            if (!punts?.length || !teams?.length) { setRankingJornada([]); setCarregantJornada(false); return }
             const puntsMapa = {}
-            punts.forEach(p => { puntsMapa[p.player_id] = Number(p.punts) })
-            const rankingCalculat = teams.map(team => {
-                const alineacio = team.alineacio || {}
+            punts?.forEach(p => { puntsMapa[p.player_id] = Number(p.punts) })
+            const rankingCalculat = (perfils || []).map(perfil => {
+                const team = teams?.find(t => t.user_id === perfil.id)
+                const alineacio = team?.alineacio || {}
                 const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
-                const perfil = perfils?.find(p => p.id === team.user_id)
-                return { userId: team.user_id, nom: perfil?.nom || perfil?.email || '...', punts: totalPunts }
+                return { userId: perfil.id, nom: perfil.nom || perfil.email || '...', punts: totalPunts }
             }).sort((a, b) => b.punts - a.punts)
             setRankingJornada(rankingCalculat)
             setCarregantJornada(false)
@@ -409,9 +417,9 @@ export default function Classificacio() {
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="font-semibold text-white truncate">{p.nom}</div>
-                                                <div className="text-gray-500 text-xs">{p.total} jugadors triats</div>
+                                                <div className="text-gray-500 text-xs">{p.total} punts totals</div>
                                             </div>
-                                            <div className="text-green-400 font-bold">0 pts</div>
+                                            <div className="text-green-400 font-bold">{p.total} pts</div>
                                         </div>
                                     ))}
                                 </div>

@@ -28,6 +28,10 @@ export default function Admin() {
     const [nouEmail, setNouEmail] = useState('')
     const [nouPassword, setNouPassword] = useState('')
     const [creanUser, setCreanUser] = useState(false)
+    const [editantUsuariId, setEditantUsuariId] = useState(null)
+    const [usuariEditant, setUsuariEditant] = useState(null)
+    const [nomEditat, setNomEditat] = useState('')
+    const [desantEdicioUsuari, setDesantEdicioUsuari] = useState(false)
 
     // Secció punts — TOTS els hooks han d'estar aquí dalt
     const [jornadaPunts, setJornadaPunts] = useState(1)
@@ -287,6 +291,46 @@ export default function Admin() {
         await supabase.from('profiles').delete().eq('id', userId)
         setMissatge('Usuari eliminat.')
         fetchTot()
+        setTimeout(() => setMissatge(''), 3000)
+    }
+
+    function obrirModalEdicioUsuari(userObj) {
+        setUsuariEditant(userObj)
+        setNomEditat(userObj?.nom || '')
+    }
+
+    function tancarModalEdicioUsuari() {
+        if (desantEdicioUsuari) return
+        setUsuariEditant(null)
+        setNomEditat('')
+    }
+
+    async function guardarEdicioUsuari() {
+        if (!usuariEditant?.id) return
+        const nom = nomEditat.trim()
+        if (!nom) return alert('El nom no pot estar buit')
+
+        const userId = usuariEditant.id
+        setDesantEdicioUsuari(true)
+        setEditantUsuariId(userId)
+        try {
+            const res = await fetch('/api/admin/update-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: usuariEditant.id, nom }),
+            })
+            const data = await res.json()
+            if (!res.ok || data.error) throw new Error(data.error || 'No s\'ha pogut editar l\'usuari')
+
+            setMissatge('✏️ Nom d\'usuari actualitzat.')
+            await fetchTot()
+            setUsuariEditant(null)
+            setNomEditat('')
+        } catch (e) {
+            setMissatge('❌ Error: ' + e.message)
+        }
+        setEditantUsuariId(null)
+        setDesantEdicioUsuari(false)
         setTimeout(() => setMissatge(''), 3000)
     }
 
@@ -766,13 +810,55 @@ export default function Admin() {
                                             <p className="font-medium text-white">{p.nom}</p>
                                             <p className="text-gray-400 text-xs">{p.email}</p>
                                         </div>
-                                        <button onClick={() => eliminarUsuari(p.id, p.email)} className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded border border-red-800 hover:border-red-600 transition">
-                                            Eliminar
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => obrirModalEdicioUsuari(p)}
+                                                disabled={editantUsuariId === p.id}
+                                                className="text-blue-400 hover:text-blue-300 text-sm px-3 py-1 rounded border border-blue-800 hover:border-blue-600 transition disabled:opacity-50">
+                                                {editantUsuariId === p.id ? 'Editant...' : 'Editar'}
+                                            </button>
+                                            <button onClick={() => eliminarUsuari(p.id, p.email)} className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded border border-red-800 hover:border-red-600 transition">
+                                                Eliminar
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
+
+                        {usuariEditant && (
+                            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                                <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md">
+                                    <h3 className="text-white font-bold text-lg mb-1">✏️ Editar nom d&apos;usuari</h3>
+                                    <p className="text-gray-400 text-sm mb-4">{usuariEditant.email}</p>
+
+                                    <label className="text-gray-400 text-sm block mb-1">Nom que es mostrarà a la classificació</label>
+                                    <input
+                                        type="text"
+                                        value={nomEditat}
+                                        onChange={e => setNomEditat(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && !desantEdicioUsuari && guardarEdicioUsuari()}
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-4"
+                                        autoFocus
+                                    />
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={tancarModalEdicioUsuari}
+                                            disabled={desantEdicioUsuari}
+                                            className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white py-2 rounded-lg transition">
+                                            Cancel·lar
+                                        </button>
+                                        <button
+                                            onClick={guardarEdicioUsuari}
+                                            disabled={desantEdicioUsuari}
+                                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded-lg font-semibold transition">
+                                            {desantEdicioUsuari ? 'Desant...' : 'Desar'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
