@@ -86,11 +86,15 @@ export default function Admin() {
     }
 
     async function fetchTot() {
-        const { data: perfils } = await supabase.from('profiles').select('id, nom, email')
+        // Llegir usuaris via API amb service key (evita bloqueig RLS al client)
+        const resUsers = await fetch('/api/admin/get-users')
+        const usersPayload = await resUsers.json()
+        const users = resUsers.ok ? usersPayload?.users : []
+
         const { data: draftData } = await supabase.from('drafts').select('*').single()
         const { data: playersData } = await supabase.from('players').select('id, nombre, posicion').order('posicion').order('nombre')
         const { data: classData } = await supabase.from('classificacio_arxivada').select('*').order('created_at', { ascending: false })
-        setParticipants(perfils || [])
+        setParticipants(users || [])
         setDraft(draftData)
         setOrdre(draftData?.ordre_participants || [])
         setMaxJugadors(draftData?.max_jugadors || 15)
