@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
-import { ensureUserProfile } from '../lib/ensureUserProfile'
 import Navbar from './components/Navbar'
 
 export default function Home() {
@@ -20,7 +19,15 @@ export default function Home() {
             }
 
             setUser(data.user)
-            await ensureUserProfile(data.user)
+
+            // Crea el perfil via API route (service key bypassa RLS)
+            const meta = data.user.user_metadata || {}
+            const nom = meta.full_name || meta.name || data.user.email?.split('@')[0] || 'Usuari'
+            await fetch('/api/auth/ensure-profile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: data.user.id, email: data.user.email, nom }),
+            })
             setLoading(false)
         }
 

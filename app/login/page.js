@@ -2,7 +2,18 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
-import { ensureUserProfile } from '../../lib/ensureUserProfile'
+
+// Helper per cridar l'API route segura (service key, bypassa RLS)
+async function registrarPerfil(user) {
+    if (!user?.id) return
+    const meta = user.user_metadata || {}
+    const nom = meta.full_name || meta.name || user.email?.split('@')[0] || 'Usuari'
+    await fetch('/api/auth/ensure-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: user.id, email: user.email, nom }),
+    })
+}
 
 export default function Login() {
     const [email, setEmail] = useState('')
@@ -35,7 +46,7 @@ export default function Login() {
             if (error) setMissatge(error.message)
             else {
                 if (data.user && data.session) {
-                    await ensureUserProfile(data.user)
+                    await registrarPerfil(data.user)
                     router.push('/')
                     setLoading(false)
                     return
@@ -46,7 +57,7 @@ export default function Login() {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password })
             if (error) setMissatge('Email o contrasenya incorrectes')
             else {
-                await ensureUserProfile(data.user)
+                await registrarPerfil(data.user)
                 router.push('/')
             }
         }
