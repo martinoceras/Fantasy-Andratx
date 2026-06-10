@@ -10,23 +10,44 @@ export async function POST(request) {
         const { id, email, nom } = await request.json()
 
         if (!id || !email) {
-            return Response.json({ error: 'Falten dades' }, { status: 400 })
+            return Response.json({ error: 'Falten dades (id, email)' }, { status: 400 })
         }
 
-        // Upsert: crea el perfil si no existeix, no fa res si ja existeix
-        const { error } = await supabaseAdmin
+        if (!process.env.SUPABASE_SERVICE_KEY) {
+            console.error('[ensure-profile] SUPABASE_SERVICE_KEY no està configurat!')
+            return Response.json({ error: 'Configuració del servidor incorrecta' }, { status: 500 })
+        }
+
+        // Comprova si ja existeix
+        const { data: existent, error: errSelect } = await supabaseAdmin
             .from('profiles')
-            .upsert({ id, email, nom }, { onConflict: 'id', ignoreDuplicates: true })
+            .select('id')
+            .eq('id', id)
+            .maybeSingle()
 
-        if (error) {
-            console.error('[ensure-profile] error:', error)
-            return Response.json({ error: error.message }, { status: 500 })
+        if (errSelect) {
+            console.error('[ensure-profile] error al fer SELECT:', errSelect)
         }
 
-        return Response.json({ ok: true })
+        if (existent) {
+            return Response.json({ ok: true, action: 'already_exists' })
+        }
+
+        // No existeix: inserim
+        const { error: errInsert } = await supabaseAdmin
+            .from('profiles')
+            .insert({ id, email, nom })
+
+        if (errInsert) {
+            console.error('[ensure-profile] error al fer INSERT:', errInsert)
+            return Response.json({ error: errInsert.message }, { status: 500 })
+        }
+
+        console.log(`[ensure-profile] Perfil creat: ${email}`)
+        return Response.json({ ok: true, action: 'created' })
+
     } catch (e) {
         console.error('[ensure-profile] exception:', e)
         return Response.json({ error: e.message }, { status: 500 })
     }
 }
-
