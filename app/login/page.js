@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
+import { ensureUserProfile } from '../../lib/ensureUserProfile'
 
 export default function Login() {
     const [email, setEmail] = useState('')
@@ -30,13 +31,24 @@ export default function Login() {
         }
 
         if (esRegistre) {
-            const { error } = await supabase.auth.signUp({ email, password })
+            const { data, error } = await supabase.auth.signUp({ email, password })
             if (error) setMissatge(error.message)
-            else setMissatge('Comprova el teu email per confirmar!')
+            else {
+                if (data.user && data.session) {
+                    await ensureUserProfile(data.user)
+                    router.push('/')
+                    setLoading(false)
+                    return
+                }
+                setMissatge('Comprova el teu email per confirmar!')
+            }
         } else {
-            const { error } = await supabase.auth.signInWithPassword({ email, password })
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password })
             if (error) setMissatge('Email o contrasenya incorrectes')
-            else router.push('/')
+            else {
+                await ensureUserProfile(data.user)
+                router.push('/')
+            }
         }
         setLoading(false)
     }
@@ -49,8 +61,17 @@ export default function Login() {
     }
 
     return (
-        <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-            <div className="bg-gray-900 p-8 rounded-xl w-full max-w-md border border-gray-800">
+        <main className="min-h-screen text-white flex items-center justify-start relative overflow-hidden">
+            {/* Fons gif a tota pantalla */}
+            <img
+                src="/musculman.gif"
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover"
+                aria-hidden="true"
+            />
+            {/* Capa fosca per llegibilitat */}
+            <div className="absolute inset-0 bg-black/60" />
+            <div className="relative z-10 bg-gray-900/80 backdrop-blur-sm p-8 rounded-xl w-full max-w-md border border-gray-700 ml-10 md:ml-20">
                 <h1 className="text-3xl font-bold text-green-400 mb-2 text-center">⚽ Fantasy Andratx</h1>
                 <p className="text-gray-400 text-center mb-8">La lliga dels amics</p>
 

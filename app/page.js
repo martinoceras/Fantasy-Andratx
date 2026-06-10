@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
+import { ensureUserProfile } from '../lib/ensureUserProfile'
 import Navbar from './components/Navbar'
 
 export default function Home() {
@@ -11,14 +12,19 @@ export default function Home() {
     const router = useRouter()
 
     useEffect(() => {
-        supabase.auth.getUser().then(({ data }) => {
+        async function init() {
+            const { data } = await supabase.auth.getUser()
             if (!data.user) {
                 router.push('/login')
-            } else {
-                setUser(data.user)
-                setLoading(false)
+                return
             }
-        })
+
+            setUser(data.user)
+            await ensureUserProfile(data.user)
+            setLoading(false)
+        }
+
+        init()
     }, [])
 
     if (loading) return (

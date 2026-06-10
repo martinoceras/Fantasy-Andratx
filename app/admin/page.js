@@ -43,6 +43,8 @@ export default function Admin() {
     // Secció canvis
     const [iniciantCanvis, setIniciantCanvis] = useState(false)
     const [missatgeCanvis, setMissatgeCanvis] = useState('')
+    const [iniciantCanvisNadal, setIniciantCanvisNadal] = useState(false)
+    const [missatgeCanvisNadal, setMissatgeCanvisNadal] = useState('')
 
     // Secció classificació arxivada
     const [classificacionsArxivades, setClassificacionsArxivades] = useState([])
@@ -51,6 +53,7 @@ export default function Admin() {
     const [guardantClass, setGuardantClass]   = useState(false)
     const [reiniciantPunts, setReiniciantPunts] = useState(false)
     const [missatgeClass, setMissatgeClass]   = useState('')
+    const [resetantDraft, setResetantDraft]   = useState(false)
 
     // Gestió picks draft (desfer / canviar jugador)
     const [picksDraft, setPicksDraft]           = useState([])
@@ -240,11 +243,23 @@ export default function Admin() {
 
     async function resetDraft() {
         if (!confirm('Segur que vols reiniciar el draft?')) return
-        await supabase.from('draft_picks').delete().neq('id', 0)
-        await supabase.from('drafts').update({ estat: 'pendent', torn_actual: 0, ordre_participants: [] }).eq('id', draft.id)
-        setOrdre([])
-        setMissatge('Draft reiniciat.')
-        fetchTot()
+        setResetantDraft(true)
+        try {
+            const res = await fetch('/api/admin/reset-draft', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            })
+            const data = await res.json()
+            if (!res.ok || data.error) throw new Error(data.error || 'No s’ha pogut reiniciar el draft')
+
+            setOrdre([])
+            setMissatge('🔄 Draft reiniciat: s’han esborrat tots els picks i s’han buidat els equips.')
+            await fetchTot()
+        } catch (e) {
+            setMissatge('❌ Error: ' + e.message)
+        }
+        setResetantDraft(false)
+        setTimeout(() => setMissatge(''), 5000)
     }
 
     async function crearUsuari() {
@@ -276,6 +291,12 @@ export default function Admin() {
         const mapa = {}
         data?.forEach(p => { mapa[p.player_id] = p.punts })
         setPuntsMapa(mapa)
+    }
+
+    function generarOrdreSerpentina(baseOrdre, rondesTotals = 1) {
+        return Array.from({ length: rondesTotals }).flatMap((_, rondaIndex) => (
+            rondaIndex % 2 === 0 ? baseOrdre : [...baseOrdre].reverse()
+        ))
     }
 
     async function sincronitzarJugadors() {
@@ -340,9 +361,11 @@ export default function Admin() {
 
             // Ordre ascendent (pitjor primer = invers de classificació)
             userPunts.sort((a, b) => a.total - b.total)
-            const ordre = userPunts.map(u => u.userId)
+            const ordreBase = userPunts.map(u => u.userId)
+            const ordre = generarOrdreSerpentina(ordreBase, 1)
 
-            // 2. Crear o actualitzar registre de canvis
+            // 2. Reiniciar picks i crear o actualitzar registre de canvis
+            await supabase.from('canvis_picks').delete().neq('id', 0)
             const { data: existing } = await supabase.from('canvis').select('id')
                 .order('created_at', { ascending: false }).limit(1).single()
 
@@ -350,8 +373,6 @@ export default function Admin() {
                 await supabase.from('canvis').update({
                     estat: 'actiu', torn_actual: 0, ordre_participants: ordre
                 }).eq('id', existing.id)
-                // Esborrar canvis anteriors d'aquesta ronda
-                await supabase.from('canvis_picks').delete().eq('canvi_id', existing.id)
             } else {
                 await supabase.from('canvis').insert({
                     estat: 'actiu', torn_actual: 0, ordre_participants: ordre
@@ -364,6 +385,52 @@ export default function Admin() {
         }
         setIniciantCanvis(false)
         setTimeout(() => setMissatgeCanvis(''), 5000)
+    }
+
+    async function iniciarRondaCanvisNadal() {
+        setIniciantCanvisNadal(true)
+        setMissatgeCanvisNadal('')
+        try {
+            const { data: allPunts } = await supabase.from('player_punts').select('player_id, punts')
+            const { data: teams }    = await supabase.from('teams').select('user_id, alineacio')
+            const { data: perfils }  = await supabase.from('profiles').select('id')
+
+            const puntsMapa = {}
+            allPunts?.forEach(p => { puntsMapa[p.player_id] = (puntsMapa[p.player_id] || 0) + Number(p.punts) })
+
+            const userPunts = (teams || []).map(team => {
+                const alineacio = team.alineacio || {}
+                const total = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
+                return { userId: team.user_id, total }
+            })
+
+            const teamIds = new Set(teams?.map(t => t.user_id) || [])
+            perfils?.forEach(p => { if (!teamIds.has(p.id)) userPunts.push({ userId: p.id, total: 0 }) })
+
+            userPunts.sort((a, b) => a.total - b.total)
+            const ordreBase = userPunts.map(u => u.userId)
+            const ordre = generarOrdreSerpentina(ordreBase, 3)
+
+            await supabase.from('canvis_picks').delete().neq('id', 0)
+            const { data: existing } = await supabase.from('canvis').select('id')
+                .order('created_at', { ascending: false }).limit(1).single()
+
+            if (existing) {
+                await supabase.from('canvis').update({
+                    estat: 'actiu', torn_actual: 0, ordre_participants: ordre
+                }).eq('id', existing.id)
+            } else {
+                await supabase.from('canvis').insert({
+                    estat: 'actiu', torn_actual: 0, ordre_participants: ordre
+                })
+            }
+
+            setMissatgeCanvisNadal(`🎄 Ronda de canvis Nadal iniciada! ${ordreBase.length} participants · 3 rondes serpentina`)
+        } catch (e) {
+            setMissatgeCanvisNadal('❌ Error: ' + e.message)
+        }
+        setIniciantCanvisNadal(false)
+        setTimeout(() => setMissatgeCanvisNadal(''), 7000)
     }
 
     if (loading) return (
@@ -524,8 +591,8 @@ export default function Admin() {
                                     🚀 Iniciar Draft
                                 </button>
                             )}
-                            <button onClick={resetDraft} className="bg-red-900 hover:bg-red-800 text-red-300 px-4 py-3 rounded-lg transition">
-                                Reset
+                            <button onClick={resetDraft} disabled={resetantDraft} className="bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-300 px-4 py-3 rounded-lg transition">
+                                {resetantDraft ? 'Reiniciant...' : '🔄 Reset Draft'}
                             </button>
                         </div>
 
@@ -676,19 +743,16 @@ export default function Admin() {
                 {/* SECCIÓ USUARIS */}
                 {seccio === 'usuaris' && (
                     <div>
-                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-6">
+                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-5">
                             <h2 className="text-white font-semibold text-lg mb-4">➕ Crear usuari</h2>
-                            <input type="text" placeholder="Nom complet" value={nouNom} onChange={e => setNouNom(e.target.value)}
-                                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500" />
-                            <input type="email" placeholder="Email" value={nouEmail} onChange={e => setNouEmail(e.target.value)}
-                                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500" />
-                            <input type="text" placeholder="Contrasenya temporal" value={nouPassword} onChange={e => setNouPassword(e.target.value)}
-                                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-4 text-white placeholder-gray-500 focus:outline-none focus:border-green-500" />
-                            <button onClick={crearUsuari} disabled={creanUser}
-                                    className="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50">
+                            <input type="text" placeholder="Nom complet" value={nouNom} onChange={e => setNouNom(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500" />
+                            <input type="email" placeholder="Email" value={nouEmail} onChange={e => setNouEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500" />
+                            <input type="text" placeholder="Contrasenya temporal" value={nouPassword} onChange={e => setNouPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-4 text-white placeholder-gray-500 focus:outline-none focus:border-green-500" />
+                            <button onClick={crearUsuari} disabled={creanUser} className="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50">
                                 {creanUser ? 'Creant...' : 'Crear usuari'}
                             </button>
                         </div>
+
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6">
                             <h2 className="text-white font-semibold text-lg mb-4">👥 Usuaris registrats ({participants.length})</h2>
                             <div className="space-y-2">
@@ -698,8 +762,7 @@ export default function Admin() {
                                             <p className="font-medium text-white">{p.nom}</p>
                                             <p className="text-gray-400 text-xs">{p.email}</p>
                                         </div>
-                                        <button onClick={() => eliminarUsuari(p.id, p.email)}
-                                                className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded border border-red-800 hover:border-red-600 transition">
+                                        <button onClick={() => eliminarUsuari(p.id, p.email)} className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded border border-red-800 hover:border-red-600 transition">
                                             Eliminar
                                         </button>
                                     </div>
@@ -716,12 +779,7 @@ export default function Admin() {
                             <p className="text-white font-semibold mb-3">Selecciona la jornada:</p>
                             <div className="grid grid-cols-7 md:grid-cols-10 gap-1.5">
                                 {Array.from({ length: 38 }, (_, i) => i + 1).map(j => (
-                                    <button key={j}
-                                            onClick={() => { setJornadaPunts(j); carregarPuntsJornada(j) }}
-                                            className={`text-xs rounded-lg py-1.5 border transition font-mono
-                                                ${jornadaPunts === j
-                                                    ? 'bg-green-500 border-green-400 text-white font-bold'
-                                                    : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}>
+                                    <button key={j} onClick={() => { setJornadaPunts(j); carregarPuntsJornada(j) }} className={`text-xs rounded-lg py-1.5 border transition font-mono ${jornadaPunts === j ? 'bg-green-500 border-green-400 text-white font-bold' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}>
                                         {j}
                                     </button>
                                 ))}
@@ -769,8 +827,7 @@ export default function Admin() {
                             )}
                         </div>
 
-                        <button onClick={desarPuntsJornada} disabled={desantPunts}
-                                className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition">
+                        <button onClick={desarPuntsJornada} disabled={desantPunts} className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition">
                             {desantPunts ? 'Desant...' : `💾 Desar punts jornada ${jornadaPunts}`}
                         </button>
                     </div>
@@ -781,12 +838,8 @@ export default function Admin() {
                     <div>
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-4">
                             <h2 className="text-white font-semibold text-lg mb-2">🔄 Sincronitzar jugadors de LaLiga</h2>
-                            <p className="text-gray-400 text-sm mb-1">
-                                Importa tots els jugadors de Primera Divisió des de <span className="text-green-400 font-mono">Biwenger</span> amb els seus preus, posicions i punts actuals.
-                            </p>
-                            <p className="text-gray-500 text-xs mb-5">
-                                S&apos;actualitza automàticament cada nit a les 4:00 AM. Pots forçar la sincronització ara prement el botó.
-                            </p>
+                            <p className="text-gray-400 text-sm mb-1">Importa tots els jugadors de Primera Divisió des de <span className="text-green-400 font-mono">Biwenger</span> amb els seus preus, posicions i punts actuals.</p>
+                            <p className="text-gray-500 text-xs mb-5">S&apos;actualitza automàticament cada nit a les 4:00 AM. Pots forçar la sincronització ara prement el botó.</p>
 
                             {missatgeSync && (
                                 <div className={`border px-4 py-3 rounded-lg mb-4 text-sm ${missatgeSync.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
@@ -794,17 +847,8 @@ export default function Admin() {
                                 </div>
                             )}
 
-                            <button
-                                onClick={sincronitzarJugadors}
-                                disabled={sincronitzant}
-                                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition flex items-center justify-center gap-2">
-                                {sincronitzant ? (
-                                    <>
-                                        <span className="animate-spin">⟳</span> Sincronitzant jugadors...
-                                    </>
-                                ) : (
-                                    '🔄 Sincronitzar ara (551+ jugadors)'
-                                )}
+                            <button onClick={sincronitzarJugadors} disabled={sincronitzant} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition flex items-center justify-center gap-2">
+                                {sincronitzant ? (<><span className="animate-spin">⟳</span> Sincronitzant jugadors...</>) : ('🔄 Sincronitzar ara (551+ jugadors)')}
                             </button>
                         </div>
 
@@ -818,22 +862,16 @@ export default function Admin() {
                                 <li>✅ Fitxatges i canvis de preu es reflecteixen l&apos;endemà automàticament</li>
                             </ul>
                         </div>
-
                     </div>
                 )}
 
                 {/* SECCIÓ CANVIS */}
                 {seccio === 'canvis' && (
-                    <div>
+                    <div className="space-y-5">
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6">
                             <h2 className="text-white font-semibold text-lg mb-2">↔️ Ronda de Canvis</h2>
-                            <p className="text-gray-400 text-sm mb-1">
-                                Inicia una ronda on cada participant pot canviar un jugador del seu equip per un de disponible.
-                            </p>
-                            <p className="text-gray-500 text-xs mb-5">
-                                L&apos;ordre serà l&apos;invers de la classificació general (el darrer de la classificació tria primer).
-                                Si ja hi ha una ronda activa, es reiniciarà.
-                            </p>
+                            <p className="text-gray-400 text-sm mb-1">Inicia una ronda on cada participant pot canviar un jugador del seu equip per un de disponible.</p>
+                            <p className="text-gray-500 text-xs mb-5">L&apos;ordre serà l&apos;invers de la classificació general (el darrer de la classificació tria primer). Si ja hi ha una ronda activa, es reiniciarà.</p>
 
                             {missatgeCanvis && (
                                 <div className={`border px-4 py-3 rounded-lg mb-4 text-sm ${missatgeCanvis.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
@@ -841,11 +879,24 @@ export default function Admin() {
                                 </div>
                             )}
 
-                            <button
-                                onClick={iniciarRondaCanvis}
-                                disabled={iniciantCanvis}
-                                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition">
+                            <button onClick={iniciarRondaCanvis} disabled={iniciantCanvis} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition">
                                 {iniciantCanvis ? '⏳ Calculant ordre...' : '🔄 Iniciar ronda de canvis'}
+                            </button>
+                        </div>
+
+                        <div className="bg-gray-900 border border-emerald-700/60 rounded-xl p-6">
+                            <h2 className="text-white font-semibold text-lg mb-2">🎄 Ronda de Canvis Nadal</h2>
+                            <p className="text-gray-400 text-sm mb-1">Ideal per a les proves de Nadal: crea una ronda especial de 3 voltes amb sistema serpentina.</p>
+                            <p className="text-gray-500 text-xs mb-5">L&apos;ordre comença invertit segons la classificació del dia d&apos;inici i després alterna en serpentina.</p>
+
+                            {missatgeCanvisNadal && (
+                                <div className={`border px-4 py-3 rounded-lg mb-4 text-sm ${missatgeCanvisNadal.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
+                                    {missatgeCanvisNadal}
+                                </div>
+                            )}
+
+                            <button onClick={iniciarRondaCanvisNadal} disabled={iniciantCanvisNadal} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition">
+                                {iniciantCanvisNadal ? '⏳ Iniciant Nadal...' : '🎄 Iniciar ronda de canvis Nadal (3 rondes)'}
                             </button>
                         </div>
                     </div>

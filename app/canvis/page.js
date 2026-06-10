@@ -12,6 +12,31 @@ const POS_COLORS = {
 
 const posicions = ['Porter', 'Defensa', 'Migcampista', 'Davanter']
 
+function obtenirMetadadesSerpentina(ordre) {
+    if (!ordre.length) return { midaRonda: 0, totalRondes: 0 }
+
+    for (let midaRonda = 1; midaRonda <= ordre.length; midaRonda++) {
+        if (ordre.length % midaRonda !== 0) continue
+
+        const base = ordre.slice(0, midaRonda)
+        if (new Set(base).size !== base.length) continue
+
+        let valid = true
+        for (let start = 0; start < ordre.length; start += midaRonda) {
+            const chunk = ordre.slice(start, start + midaRonda)
+            const expected = (start / midaRonda) % 2 === 0 ? base : [...base].reverse()
+            if (chunk.length !== midaRonda || chunk.some((v, i) => v !== expected[i])) {
+                valid = false
+                break
+            }
+        }
+
+        if (valid) return { midaRonda, totalRondes: ordre.length / midaRonda }
+    }
+
+    return { midaRonda: ordre.length, totalRondes: 1 }
+}
+
 function HistorialCanvis({ canvisPicks, players, participants }) {
     if (!canvisPicks.length) return null
     return (
@@ -140,10 +165,15 @@ export default function Canvis() {
     }
 
     const ordre      = canvisData?.ordre_participants || []
-    const userActual = ordre[canvisData?.torn_actual ?? 0]
+    const { midaRonda, totalRondes } = obtenirMetadadesSerpentina(ordre)
+    const tornActual = canvisData?.torn_actual ?? 0
+    const rondaActual = midaRonda ? Math.floor(tornActual / midaRonda) : 0
+    const ordreRondaActual = midaRonda ? ordre.slice(rondaActual * midaRonda, (rondaActual + 1) * midaRonda) : ordre
+    const posActual = midaRonda ? tornActual % midaRonda : 0
+    const userActual = ordreRondaActual[posActual]
     const esMeuTorn  = userActual === user?.id
     const nomActual  = participants.find(p => p.id === userActual)?.nom || '...'
-    const jaHeCanviat = canvisPicks.some(c => c.user_id === user?.id)
+    const jaHeCanviat = canvisPicks.some(c => c.torn === tornActual && c.user_id === user?.id)
 
     const pickIds      = new Set(totsElsPicks.map(p => p.player_id))
     const meusPickIds  = new Set(meusPicks)
@@ -181,7 +211,10 @@ export default function Canvis() {
                         <>
                             {/* Banner */}
                             <div className={`rounded-xl p-3 mb-5 text-center border ${esMeuTorn && !jaHeCanviat ? 'bg-blue-900/50 border-blue-500 animate-pulse' : 'bg-gray-900 border-gray-700'}`}>
-                                <p className="text-xs text-gray-400 mb-0.5">Torn {(canvisData.torn_actual || 0) + 1} de {ordre.length}</p>
+                                <p className="text-xs text-gray-400 mb-0.5">
+                                    Torn {tornActual + 1} de {ordre.length}
+                                    {totalRondes > 1 && midaRonda ? ` · Ronda ${rondaActual + 1} de ${totalRondes}` : ''}
+                                </p>
                                 {esMeuTorn && !jaHeCanviat
                                     ? <p className="text-blue-300 font-bold text-lg">🔄 És el teu torn! Selecciona el teu canvi</p>
                                     : jaHeCanviat
@@ -192,19 +225,22 @@ export default function Canvis() {
 
                             {/* Progrés */}
                             <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-5">
-                                <p className="text-gray-500 text-xs uppercase tracking-wider mb-2 font-semibold">Ordre (invers classificació general)</p>
+                                <p className="text-gray-500 text-xs uppercase tracking-wider mb-2 font-semibold">
+                                    Ordre {totalRondes > 1 ? `(serpentina ${totalRondes} rondes)` : '(invers classificació general)'}
+                                </p>
                                 <div className="flex flex-wrap gap-2">
                                     {ordre.map((uid, idx) => {
                                         const part = participants.find(p => p.id === uid)
-                                        const fet = canvisPicks.some(c => c.user_id === uid)
-                                        const cur = idx === (canvisData.torn_actual || 0)
+                                        const fet = canvisPicks.some(c => c.torn === idx)
+                                        const cur = idx === tornActual
+                                        const rondaBadge = midaRonda ? Math.floor(idx / midaRonda) + 1 : 1
                                         return (
                                             <span key={uid} className={`text-xs px-3 py-1.5 rounded-full font-medium border
                                                 ${fet ? 'bg-green-900/40 border-green-700 text-green-300' :
                                                   cur ? 'bg-blue-600 border-blue-400 text-white' :
                                                         'bg-gray-800 border-gray-700 text-gray-400'}`}>
                                                 {fet ? '✓ ' : cur ? '→ ' : ''}
-                                                {part?.nom || uid.slice(0, 8)}{uid === user?.id ? ' (tu)' : ''}
+                                                {part?.nom || uid.slice(0, 8)}{totalRondes > 1 ? ` · R${rondaBadge}` : ''}{uid === user?.id ? ' (tu)' : ''}
                                             </span>
                                         )
                                     })}
