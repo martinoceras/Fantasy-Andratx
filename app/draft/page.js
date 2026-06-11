@@ -23,6 +23,7 @@ export default function Draft() {
     const [participants, setParticipants] = useState([])
     const [cerca, setCerca]               = useState('')
     const [posicioFiltro, setPosicioFiltro] = useState('Tots')
+    const [equipsFiltro, setEquipsFiltro] = useState([])         // [] = tots, [...] = seleccionats
     const [ordenar, setOrdenar]           = useState('posicio')  // 'posicio' | 'preu' | 'punts'
     const [vistaJugadors, setVistaJugadors] = useState('tots') // 'tots' | 'disponibles' | 'seleccionats'
     const [jugadorPreSel, setJugadorPreSel] = useState(null)
@@ -280,12 +281,22 @@ export default function Draft() {
     }
 
     const posicions = ['Porter', 'Defensa', 'Migcampista', 'Davanter']
+    // Llista d'equips únics ordenats alfabèticament, derivada dels jugadors carregats
+    const equipsDeLaLliga = [...new Set(players.map(p => p.equipo_real).filter(Boolean))].sort()
+
+    function toggleEquip(equip) {
+        setEquipsFiltro(prev =>
+            prev.includes(equip) ? prev.filter(e => e !== equip) : [...prev, equip]
+        )
+    }
+
     const jugadorsFiltrats = players
         .filter(p => {
             const okCerca = cerca === '' || p.nombre.toLowerCase().includes(cerca.toLowerCase()) ||
                 (p.equipo_real || '').toLowerCase().includes(cerca.toLowerCase())
             const okPos = posicioFiltro === 'Tots' || p.posicion === posicioFiltro
-            return okCerca && okPos
+            const okEquip = equipsFiltro.length === 0 || equipsFiltro.includes(p.equipo_real)
+            return okCerca && okPos && okEquip
         })
         .sort((a, b) => {
             if (ordenar === 'preu')  return (b.precio || 0) - (a.precio || 0)
@@ -537,7 +548,7 @@ export default function Draft() {
                                         />
                                         <div className="flex gap-2 flex-wrap">
                                             {/* Filtre posició */}
-                                            <div className="flex gap-1">
+                                            <div className="flex gap-1 flex-wrap">
                                                 {['Tots', ...posicions].map(pos => (
                                                     <button key={pos} onClick={() => setPosicioFiltro(pos)}
                                                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition
@@ -567,10 +578,50 @@ export default function Draft() {
                                             </div>
                                         </div>
                                         <div className="flex justify-end">
-                                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 border border-gray-700">
-                                                {meusPicks.length}/{maxJugadorsDraft} teus
-                                            </span>
-                                        </div>
+                                             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 border border-gray-700">
+                                                 {meusPicks.length}/{maxJugadorsDraft} teus
+                                             </span>
+                                         </div>
+
+                                        {/* Filtre equips — selecció múltiple acumulable */}
+                                        {equipsDeLaLliga.length > 0 && (
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <span className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">Equip</span>
+                                                    {equipsFiltro.length > 0 && (
+                                                        <button
+                                                            onClick={() => setEquipsFiltro([])}
+                                                            className="text-[10px] text-orange-400 hover:text-orange-300 transition font-semibold">
+                                                            ✕ Netejar ({equipsFiltro.length})
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="flex gap-1.5 flex-wrap">
+                                                    {equipsDeLaLliga.map(equip => {
+                                                        const actiu = equipsFiltro.includes(equip)
+                                                        const compteJugadors = players.filter(p =>
+                                                            p.equipo_real === equip &&
+                                                            (posicioFiltro === 'Tots' || p.posicion === posicioFiltro)
+                                                        ).length
+                                                        return (
+                                                            <button
+                                                                key={equip}
+                                                                onClick={() => toggleEquip(equip)}
+                                                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition border ${
+                                                                    actiu
+                                                                        ? 'bg-orange-500 border-orange-400 text-white shadow-md scale-105'
+                                                                        : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'
+                                                                }`}>
+                                                                {equip.length > 12 ? equip.slice(0, 12) + '…' : equip}
+                                                                <span className={`ml-1 text-[9px] ${actiu ? 'text-orange-200' : 'text-gray-600'}`}>
+                                                                    {compteJugadors}
+                                                                </span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
                                      </div>
 
                                     {/* Llista de jugadors */}
