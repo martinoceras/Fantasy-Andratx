@@ -23,6 +23,7 @@ export default function Draft() {
     const [cerca, setCerca]               = useState('')
     const [posicioFiltro, setPosicioFiltro] = useState('Tots')
     const [ordenar, setOrdenar]           = useState('posicio')  // 'posicio' | 'preu' | 'punts'
+    const [vistaJugadors, setVistaJugadors] = useState('tots') // 'tots' | 'disponibles' | 'seleccionats'
     const [jugadorPreSel, setJugadorPreSel] = useState(null)
     const [confirmant, setConfirmant]       = useState(false)
     const [puntsByPlayer, setPuntsByPlayer] = useState({})     // {playerId: [{jornada, punts}]} — darreres 5
@@ -37,9 +38,22 @@ export default function Draft() {
     }
 
     function formatTemps(segonsTotals) {
-        const min = Math.floor(segonsTotals / 60)
-        const sec = segonsTotals % 60
+        const segons = Math.max(0, Number(segonsTotals) || 0)
+        const min = Math.floor(segons / 60)
+        const sec = segons % 60
         return `${min}:${String(sec).padStart(2, '0')}`
+    }
+
+    function formatDuracio(segonsTotals) {
+        const segons = Math.max(0, Number(segonsTotals) || 0)
+        const mins = Math.floor(segons / 60)
+        const sec = segons % 60
+        if (mins >= 60) {
+            const h = Math.floor(mins / 60)
+            const m = mins % 60
+            return `${h}h ${String(m).padStart(2, '0')}m`
+        }
+        return `${mins}m ${String(sec).padStart(2, '0')}s`
     }
 
     function classeTemps(mins) {
@@ -84,7 +98,10 @@ export default function Draft() {
     }
 
     async function fetchPicks(userId) {
-        const { data } = await supabase.from('draft_picks').select('player_id, user_id')
+        const { data } = await supabase
+            .from('draft_picks')
+            .select('player_id, user_id, torn, temps_seleccio')
+            .order('torn', { ascending: true })
         setPicksDetall(data || [])
         setPicks(data?.map(p => p.player_id) || [])
         if (userId) setMeusPicks(data?.filter(p => p.user_id === userId).map(p => p.player_id) || [])
@@ -240,6 +257,7 @@ export default function Draft() {
 
     // Filtre jugadors
     const maxEquip = draft?.max_jugadors_equip || 999  // límit per equip real
+    const maxJugadorsDraft = draft?.max_jugadors || 15
 
     // Límits per posició (fixes de la lliga)
     const LIMIT_POSICIO = { Porter: 2, Defensa: 6, Migcampista: 6, Davanter: 4 }
@@ -273,6 +291,23 @@ export default function Draft() {
             if (ordenar === 'punts') return (b.punts_totals || 0) - (a.punts_totals || 0)
             return 0  // 'posicio': l'agrupació ja gestiona l'ordre
         })
+    const jugadorsDisponibles = jugadorsFiltrats.filter(p => !picks.includes(p.id))
+    const jugadorsVista = vistaJugadors === 'disponibles' ? jugadorsDisponibles : jugadorsFiltrats
+    const seleccionsPerUsuari = participants
+        .map(part => {
+            const picksUser = picksDetall.filter(pk => pk.user_id === part.id)
+            const jugadorsUser = picksUser
+                .map(pk => players.find(pl => pl.id === pk.player_id))
+                .filter(Boolean)
+            const totalSegons = picksUser.reduce((sum, pk) => sum + (Number(pk.temps_seleccio) || 0), 0)
+            return {
+                userId: part.id,
+                nom: part.nom || part.email?.split('@')[0] || 'Usuari',
+                jugadors: jugadorsUser,
+                totalSegons,
+            }
+        })
+        .filter(grup => grup.jugadors.length > 0)
 
     // ── Format preu ─────────────────────────────────────────────────
     function formatPreu(precio) {
@@ -446,6 +481,25 @@ export default function Draft() {
                                 {/* ── ESQUERRA: Jugadors ── */}
                                 <div className="flex-1 min-w-0">
 
+                                {/* Filtres de vista de jugadors */}
+                                <div className="grid grid-cols-3 gap-2 mb-3 w-full">
+                                     <button
+                                         onClick={() => setVistaJugadors('tots')}
+                                         className={`w-full px-3 py-2 rounded-lg text-xs font-bold transition border ${vistaJugadors === 'tots' ? 'bg-green-500 border-green-400 text-white' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}>
+                                         ⚽ Tots ({jugadorsFiltrats.length})
+                                     </button>
+                                      <button
+                                          onClick={() => setVistaJugadors('disponibles')}
+                                         className={`w-full px-3 py-2 rounded-lg text-xs font-bold transition border ${vistaJugadors === 'disponibles' ? 'bg-green-500 border-green-400 text-white' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}>
+                                         🟢 Disponibles ({jugadorsDisponibles.length})
+                                      </button>
+                                      <button
+                                          onClick={() => setVistaJugadors('seleccionats')}
+                                         className={`w-full px-3 py-2 rounded-lg text-xs font-bold transition border ${vistaJugadors === 'seleccionats' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}>
+                                         👥 Seleccionats ({picks.length})
+                                      </button>
+                                  </div>
+
                                     {/* ── Comptador posicions del meu equip ── */}
                                 {meusPicks.length > 0 && (
                                     <div className="flex gap-2 mb-3">
@@ -471,6 +525,8 @@ export default function Draft() {
                                     </div>
                                 )}
 
+                                {vistaJugadors !== 'seleccionats' && (
+                                    <>
                                 {/* Barra cerca + filtres + ordenació */}
                                     <div className="flex flex-col gap-2 mb-4">
                                         <input
@@ -511,15 +567,20 @@ export default function Draft() {
                                                 ))}
                                             </div>
                                         </div>
-                                    </div>
+                                        <div className="flex justify-end">
+                                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 border border-gray-700">
+                                                {meusPicks.length}/{maxJugadorsDraft} teus
+                                            </span>
+                                        </div>
+                                     </div>
 
                                     {/* Llista de jugadors */}
-                                    {jugadorsFiltrats.length === 0 ? (
+                                    {jugadorsVista.length === 0 ? (
                                         <p className="text-gray-500 text-center py-10">Sense resultats per &ldquo;{cerca}&rdquo;</p>
                                     ) : ordenar !== 'posicio' ? (
                                         /* Vista plana ordenada per preu o punts */
                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
-                                            {jugadorsFiltrats.map(player => {
+                                            {jugadorsVista.map(player => {
                                                 const agafat     = picks.includes(player.id)
                                                 const meu        = meusPicks.includes(player.id)
                                                 const owner      = agafat ? propietari(player.id) : null
@@ -535,7 +596,7 @@ export default function Draft() {
                                         /* Vista agrupada per posició */
                                         <div className="space-y-6">
                                             {(posicioFiltro === 'Tots' ? posicions : [posicioFiltro]).map(pos => {
-                                                const del = jugadorsFiltrats.filter(p => p.posicion === pos)
+                                                const del = jugadorsVista.filter(p => p.posicion === pos)
                                                 if (!del.length) return null
                                                 const colors = POS_COLORS[pos]
                                                 const comptActualPos = meusDePos(pos)
@@ -547,10 +608,10 @@ export default function Draft() {
                                                             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${colors.bg} ${colors.text}`}>
                                                                 {pos.toUpperCase()}
                                                             </span>
-                                                            <span className="text-gray-500 text-xs">{del.length} disponibles</span>
-                                                            {/* Comptador de la posició */}
-                                                            <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${posPlena ? 'bg-red-900 text-red-300' : 'bg-gray-800 text-gray-300'}`}>
-                                                                {posPlena ? '🚫 ' : ''}{comptActualPos}/{maxPosActual} teus
+                                                            <span className="text-gray-500 text-xs">{del.length} {vistaJugadors === 'disponibles' ? 'disponibles' : 'jugadors'}</span>
+                                                            {/* Estat límit posició */}
+                                                            <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${posPlena ? 'bg-red-900 text-red-300' : 'bg-gray-800 text-gray-500'}`}>
+                                                                {posPlena ? '🚫 LÍMIT POSICIÓ' : ' '}
                                                             </span>
                                                         </div>
                                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
@@ -570,6 +631,41 @@ export default function Draft() {
                                             })}
                                         </div>
                                     )}
+                                    </>
+                                )}
+
+                                {vistaJugadors === 'seleccionats' && (
+                                    <div className="space-y-4">
+                                        {seleccionsPerUsuari.length === 0 ? (
+                                            <p className="text-gray-500 text-center py-10">Encara no hi ha jugadors seleccionats.</p>
+                                        ) : (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                {seleccionsPerUsuari.map(({ userId, nom, jugadors, totalSegons }) => (
+                                                    <div key={userId} className="bg-gray-900 border border-gray-700 rounded-xl p-3">
+                                                        <div className="flex items-center justify-between mb-1.5 gap-2">
+                                                             <p className="text-white font-semibold text-sm truncate">{nom}</p>
+                                                            <span className="text-[10px] text-gray-500 whitespace-nowrap">{jugadors.length} picks</span>
+                                                         </div>
+                                                        <div className="text-[10px] text-cyan-300 mb-2 font-semibold">⏱️ Temps total: {formatDuracio(totalSegons)}</div>
+                                                         <div className="space-y-1">
+                                                            {jugadors.map(j => {
+                                                                const colors = POS_COLORS[j.posicion]
+                                                                return (
+                                                                    <div key={j.id} className="flex items-center gap-2 bg-gray-800 rounded-lg px-2 py-1.5">
+                                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${colors.bg} ${colors.text}`}>
+                                                                            {j.posicion?.slice(0, 3).toUpperCase()}
+                                                                        </span>
+                                                                        <span className="text-white text-xs truncate flex-1">{j.nombre}</span>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                         </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 </div>
 
                                 {/* ── DRETA: Ordre del draft ── */}

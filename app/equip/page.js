@@ -432,7 +432,7 @@ export default function Equip() {
                     </div>
 
                     {/* Panell lateral */}
-                    <div className="flex-1 flex flex-col gap-3 min-w-0">
+                    <div className="w-[430px] max-w-full flex-shrink-0 flex flex-col gap-3 min-w-0">
 
                         {/* Info seleccionat */}
                         {seleccionat && (
@@ -452,7 +452,7 @@ export default function Equip() {
                         )}
 
                         {/* Banqueta per posicions i prioritat */}
-                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 overflow-y-auto" style={{ maxHeight: 420 }}>
+                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 overflow-y-auto" style={{ maxHeight: 560 }}>
                             <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">
                                 Banqueta ({Object.values(suplents).filter(Boolean).length})
                             </p>
@@ -466,19 +466,19 @@ export default function Equip() {
                                             <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">{posicio}</p>
                                         </div>
 
-                                        <div className="flex gap-2 flex-wrap">
+                                        <div className="flex gap-3 flex-wrap">
                                             {Array.from({ length: totalSlots }).map((_, index) => {
                                                 const jugador = getBanquetaJugador(posicio, index)
                                                 const esSelec = jugador && seleccionat?.id === jugador.id
                                                 return (
-                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 62 }}>
+                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 72 }}>
                                                         <div
                                                             onClick={() => handleClickBanqueta(posicio, index)}
-                                                            className={`w-12 h-12 rounded-full border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
+                                                            className={`w-14 h-14 rounded-full border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
                                                         >
                                                             {jugador
-                                                                ? <span className={`text-[9px] font-bold ${colors.text} text-center px-1`}>{nomCurt(jugador.nombre)}</span>
-                                                                : <span className="text-white/25 text-sm">{index + 1}</span>
+                                                                ? <span className={`text-[10px] font-bold ${colors.text} text-center px-1`}>{nomCurt(jugador.nombre)}</span>
+                                                                : <span className="text-white/25 text-base">{index + 1}</span>
                                                             }
                                                         </div>
                                                         <span className="text-[10px] text-gray-500 mt-1">#{index + 1}</span>
@@ -560,4 +560,3 @@ function autoOmplirPlantilla(players, formacioActiva, titularsActuals = {}, supl
 
     return { nousTitulars, nousSuplents }
 }
-
