@@ -12,7 +12,10 @@ export default function Admin() {
     const [pinUser, setPinUser]       = useState('')
     const [pinPass, setPinPass]       = useState('')
     const [pinError, setPinError]     = useState('')
-    const [adminOk, setAdminOk]       = useState(false)
+    const [adminOk, setAdminOk] = useState(() => {
+        if (typeof window === 'undefined') return false
+        return sessionStorage.getItem('admin_auth') === 'ok'
+    })
     const [participants, setParticipants] = useState([])
     const [draft, setDraft] = useState(null)
     const [ordre, setOrdre] = useState([])
@@ -68,17 +71,6 @@ export default function Admin() {
 
     const router = useRouter()
 
-    useEffect(() => {
-        // Comprovar si ja té la sessió admin (via login o PIN)
-        if (typeof window !== 'undefined' && sessionStorage.getItem('admin_auth') === 'ok') {
-            setAdminOk(true)
-        }
-        supabase.auth.getUser().then(({ data }) => {
-            setUser(data.user)
-            fetchTot()
-        })
-    }, [])
-
     function comprovarPin() {
         if (pinUser === ADMIN_USER && pinPass === ADMIN_PASS) {
             sessionStorage.setItem('admin_auth', 'ok')
@@ -109,6 +101,13 @@ export default function Admin() {
         await carregarPicksDraft()
         setLoading(false)
     }
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            setUser(data.user)
+            void fetchTot()
+        })
+    }, [])
 
     async function calcularClassificacioActual(perfils) {
         const { data: allPunts } = await supabase.from('player_punts').select('player_id, punts')
@@ -172,9 +171,24 @@ export default function Admin() {
     async function carregarPicksDraft() {
         const { data } = await supabase
             .from('draft_picks')
-            .select('id, player_id, user_id, torn')
+            .select('id, player_id, user_id, torn, temps_seleccio')
             .order('torn', { ascending: true })
         setPicksDraft(data || [])
+    }
+
+    function formatSegons(segonsTotals) {
+        const segons = Math.max(0, Number(segonsTotals) || 0)
+        const h = Math.floor(segons / 3600)
+        const m = Math.floor((segons % 3600) / 60)
+        const s = segons % 60
+        if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+        return `${m}m ${String(s).padStart(2, '0')}s`
+    }
+
+    function colorTempsMinuts(mins) {
+        if (mins > 60) return 'text-red-400'
+        if (mins >= 21) return 'text-yellow-400'
+        return 'text-green-400'
     }
 
     async function desferPick(pick) {
@@ -521,6 +535,21 @@ export default function Admin() {
     )
 
     const noAfegits = participants.filter(p => !ordre.includes(p.id))
+    const resumTempsDraft = participants
+        .map((p) => {
+            const picksUsuari = picksDraft.filter(pk => pk.user_id === p.id)
+            const totalSegons = picksUsuari.reduce((sum, pk) => sum + (Number(pk.temps_seleccio) || 0), 0)
+            const mitjanaSegons = picksUsuari.length ? Math.round(totalSegons / picksUsuari.length) : 0
+            return {
+                userId: p.id,
+                nom: p.nom || p.email || p.id,
+                picks: picksUsuari.length,
+                totalSegons,
+                mitjanaSegons,
+            }
+        })
+        .filter(x => x.picks > 0)
+        .sort((a, b) => b.totalSegons - a.totalSegons)
 
     return (
         <main className="min-h-screen bg-gray-950 text-white p-8">
@@ -564,6 +593,34 @@ export default function Admin() {
                                 </span>
                             </p>
                             <p className="text-gray-400 text-sm mt-1">Màxim jugadors per equip: <span className="text-white font-semibold">{maxJugadors}</span></p>
+                        </div>
+
+                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-6">
+                            <div className="flex items-center justify-between mb-3">
+                                <p className="text-white font-semibold">⏱️ Temps de selecció per usuari</p>
+                                <p className="text-gray-500 text-xs">Basat en `draft_picks.temps_seleccio`</p>
+                            </div>
+
+                            {resumTempsDraft.length === 0 ? (
+                                <p className="text-gray-600 text-sm">Encara no hi ha picks amb temps registrat.</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {resumTempsDraft.map((r, idx) => {
+                                        const minsMitjana = Math.floor(r.mitjanaSegons / 60)
+                                        return (
+                                            <div key={r.userId} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
+                                                <span className="text-gray-500 text-xs w-5">#{idx + 1}</span>
+                                                <span className="text-white text-sm font-medium flex-1 truncate">{r.nom}</span>
+                                                <span className="text-gray-500 text-xs">{r.picks} picks</span>
+                                                <span className="text-cyan-300 text-xs font-semibold">Total: {formatSegons(r.totalSegons)}</span>
+                                                <span className={`text-xs font-semibold ${colorTempsMinuts(minsMitjana)}`}>
+                                                    Mitjana: {formatSegons(r.mitjanaSegons)}
+                                                </span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
                         </div>
 
                         {noAfegits.length > 0 && (

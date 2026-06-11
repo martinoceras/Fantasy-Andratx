@@ -26,25 +26,27 @@ export default function Draft() {
     const [jugadorPreSel, setJugadorPreSel] = useState(null)
     const [confirmant, setConfirmant]       = useState(false)
     const [puntsByPlayer, setPuntsByPlayer] = useState({})     // {playerId: [{jornada, punts}]} — darreres 5
+    const [araTs, setAraTs] = useState(() => Date.now())
     const router = useRouter()
 
-    useEffect(() => {
-        supabase.auth.getUser().then(({ data }) => {
-            if (!data.user) router.push('/login')
-            else { setUser(data.user); guardarPerfil(data.user); fetchTot(data.user.id) }
-        })
+    function segonsTornActual() {
+        if (!draft?.torn_iniciat_at) return 0
+        const inici = new Date(draft.torn_iniciat_at).getTime()
+        if (Number.isNaN(inici)) return 0
+        return Math.max(0, Math.floor((araTs - inici) / 1000))
+    }
 
-        const canal = supabase.channel('draft-canal')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_picks' }, () => {
-                supabase.auth.getUser().then(({ data }) => fetchPicks(data.user?.id))
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'drafts' }, () => {
-                fetchDraft()
-            })
-            .subscribe()
+    function formatTemps(segonsTotals) {
+        const min = Math.floor(segonsTotals / 60)
+        const sec = segonsTotals % 60
+        return `${min}:${String(sec).padStart(2, '0')}`
+    }
 
-        return () => supabase.removeChannel(canal)
-    }, [])
+    function classeTemps(mins) {
+        if (mins > 60) return 'text-red-400'
+        if (mins >= 21) return 'text-yellow-400'
+        return 'text-green-400'
+    }
 
     async function guardarPerfil(u) {
         const { data } = await supabase.from('profiles').select('id').eq('id', u.id).single()
@@ -110,6 +112,7 @@ export default function Draft() {
     async function pickPlayer(playerId) {
         if (!user || !draft || !esMeuTorn) return
         const playerData = players.find(p => p.id === playerId)
+        const tornSegons = segonsTornActual()
 
         // Validació límit equip real
         if (playerData && maxEquip < 999) {
@@ -142,8 +145,16 @@ export default function Draft() {
         const posSeguent = (posActual + 1) % ordre.length
         const seguentUserId = ordenat[posSeguent]
 
-        await supabase.from('draft_picks').insert({ player_id: playerId, user_id: user.id, torn: draft.torn_actual })
-        await supabase.from('drafts').update({ torn_actual: draft.torn_actual + 1 }).eq('id', draft.id)
+        await supabase.from('draft_picks').insert({
+            player_id: playerId,
+            user_id: user.id,
+            torn: draft.torn_actual,
+            temps_seleccio: tornSegons,
+        })
+        await supabase.from('drafts').update({
+            torn_actual: draft.torn_actual + 1,
+            torn_iniciat_at: new Date().toISOString(),
+        }).eq('id', draft.id)
 
         const seguent = participants.find(p => p.id === seguentUserId)
         if (seguent?.email) {
@@ -160,6 +171,29 @@ export default function Draft() {
         setConfirmant(false)
     }
 
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            if (!data.user) router.push('/login')
+            else { setUser(data.user); guardarPerfil(data.user); fetchTot(data.user.id) }
+        })
+
+        const canal = supabase.channel('draft-canal')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_picks' }, () => {
+                supabase.auth.getUser().then(({ data }) => fetchPicks(data.user?.id))
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'drafts' }, () => {
+                fetchDraft()
+            })
+            .subscribe()
+
+        return () => { void supabase.removeChannel(canal) }
+    }, [])
+
+    useEffect(() => {
+        const id = setInterval(() => setAraTs(Date.now()), 1000)
+        return () => clearInterval(id)
+    }, [])
+
     // ── Derived state ────────────────────────────────────────────────
     const ordre = draft?.ordre_participants || []
     const n = ordre.length || 1
@@ -170,6 +204,9 @@ export default function Draft() {
     const esMeuTorn = userActual === user?.id
     const nomActual = participants.find(p => p.id === userActual)?.nom || '...'
     const jaEstic = ordre.includes(user?.id)
+    const segonsTurn = segonsTornActual()
+    const minutsTurn = Math.floor(segonsTurn / 60)
+    const colorTemps = classeTemps(minutsTurn)
 
     function propietari(playerId) {
         const pick = picksDetall.find(p => p.player_id === playerId)
@@ -543,6 +580,11 @@ export default function Draft() {
                                             <p className="text-gray-500 text-xs mt-0.5">
                                                 {picks.length} picks realitzats · {ordre.length} participants
                                             </p>
+                                            {draft?.estat === 'actiu' && (
+                                                <p className={`text-xs mt-1 font-semibold ${colorTemps}`}>
+                                                    ⏱️ Torn actual: {formatTemps(segonsTurn)}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="overflow-y-auto max-h-[600px]">
                                             {generarTorns().map(({ t, uid, nom, esCurrent, esPassat, esMeu }) => (

@@ -24,6 +24,30 @@ const POS_COLORS = {
     Davanter:    { bg: 'bg-red-500',    text: 'text-red-900',    border: 'border-red-400',    light: 'bg-red-900/40' },
 }
 
+const BANQUETA_SLOTS = {
+    Davanter: 3,
+    Migcampista: 3,
+    Defensa: 3,
+    Porter: 1,
+}
+
+const ORDRE_POSICIONS = ['Porter', 'Defensa', 'Migcampista', 'Davanter']
+function normalitzarSuplents(suplentsRaw) {
+    if (!suplentsRaw) return {}
+    if (!Array.isArray(suplentsRaw)) return suplentsRaw
+
+    const slots = {}
+    let indexArray = 0
+    Object.entries(BANQUETA_SLOTS).forEach(([posicio, total]) => {
+        for (let i = 0; i < total; i++) {
+            const id = suplentsRaw[indexArray]
+            if (id) slots[`${posicio}_${i}`] = id
+            indexArray += 1
+        }
+    })
+    return slots
+}
+
 export default function Equip() {
     const [user, setUser]               = useState(null)
     const [jugadors, setJugadors]       = useState([])
@@ -31,6 +55,7 @@ export default function Equip() {
     const [team, setTeam]               = useState(null)
     const [formacio, setFormacio]       = useState('4-4-2')
     const [titulars, setTitulars]       = useState({})
+    const [suplents, setSuplents]       = useState({})
     const [seleccionat, setSeleccionat] = useState(null)
     const [loading, setLoading]         = useState(true)
     const [desant, setDesant]           = useState(false)
@@ -46,12 +71,43 @@ export default function Equip() {
         if (picks?.length) {
             const { data: players } = await supabase.from('players').select('*').in('id', picks.map(p => p.player_id))
             setJugadors(players || [])
+            const { data: teamData } = await supabase.from('teams').select('*').eq('user_id', userId).single()
+            const formacioActual = teamData?.formacio || '4-4-2'
+            const titularsActuals = teamData?.alineacio || {}
+            const suplentsActuals = normalitzarSuplents(teamData?.suplents)
+            const { nousTitulars, nousSuplents } = autoOmplirPlantilla(players || [], formacioActual, titularsActuals, suplentsActuals)
+
+            setTeam(teamData || null)
+            setFormacio(formacioActual)
+            setTitulars(nousTitulars)
+            setSuplents(nousSuplents)
+
+            if (!teamData || JSON.stringify(nousTitulars) !== JSON.stringify(titularsActuals) || JSON.stringify(nousSuplents) !== JSON.stringify(suplentsActuals)) {
+                const payload = {
+                    user_id: userId,
+                    temporada: TEMPORADA,
+                    formacio: formacioActual,
+                    alineacio: nousTitulars,
+                    suplents: nousSuplents,
+                }
+                if (teamData) {
+                    await supabase.from('teams').update(payload).eq('user_id', userId)
+                } else {
+                    const { data: nouTeam } = await supabase.from('teams').insert(payload).select().single()
+                    if (nouTeam) setTeam(nouTeam)
+                }
+            }
+
+            setLoading(false)
+            return
         }
+        setJugadors([])
+        setTitulars({})
+        setSuplents({})
         const { data: teamData } = await supabase.from('teams').select('*').eq('user_id', userId).single()
         if (teamData) {
             setTeam(teamData)
             setFormacio(teamData.formacio || '4-4-2')
-            setTitulars(teamData.alineacio || {})
         }
         setLoading(false)
     }
@@ -63,7 +119,7 @@ export default function Equip() {
         })
     }, [])
 
-    async function desarAuto(nousTitulars, novaFormacio) {
+    async function desarAuto(nousTitulars, novaFormacio, nousSuplents) {
         if (!user) return
         setDesant(true)
         const payload = {
@@ -71,13 +127,13 @@ export default function Equip() {
             temporada: TEMPORADA,
             formacio: novaFormacio ?? formacio,
             alineacio: nousTitulars ?? titulars,
-            suplents: []
+            suplents: nousSuplents ?? suplents,
         }
         if (team) {
             await supabase.from('teams').update(payload).eq('user_id', user.id)
         } else {
-            const { data } = await supabase.from('teams').insert(payload).select().single()
-            setTeam(data)
+            const { data: nouTeam } = await supabase.from('teams').insert(payload).select().single()
+            if (nouTeam) setTeam(nouTeam)
         }
         setTimeout(() => setDesant(false), 800)
     }
@@ -101,10 +157,12 @@ export default function Equip() {
             }
         })
 
+        const { nousSuplents } = autoOmplirPlantilla(jugadors, novaFormacio, nousTitulars, suplents)
         setFormacio(novaFormacio)
         setTitulars(nousTitulars)
+        setSuplents(nousSuplents)
         setSeleccionat(null)
-        desarAuto(nousTitulars, novaFormacio)
+        desarAuto(nousTitulars, novaFormacio, nousSuplents)
     }
 
     function potJugarDe(jugador, posicio) {
@@ -124,6 +182,7 @@ export default function Equip() {
     function handleClickSlot(posicio, index) {
         const key = `${posicio}_${index}`
         const jugadorActualId = titulars[key]
+        const jugadorActual = jugadors.find(j => j.id === jugadorActualId)
 
         if (!seleccionat) {
             if (jugadorActualId) setSeleccionat({ tipus: 'titular', key, posicio, id: jugadorActualId })
@@ -135,7 +194,6 @@ export default function Equip() {
         if (seleccionat.key === key) { setSeleccionat(null); return }
 
         const jugadorMovent = jugadors.find(j => j.id === seleccionat.id)
-        const jugadorActual = jugadors.find(j => j.id === jugadorActualId)
 
         // Validacio: el jugador que movem pot anar a aquesta posicio?
         if (jugadorMovent && !potJugarDe(jugadorMovent, posicio)) {
@@ -154,6 +212,7 @@ export default function Equip() {
         }
 
         const nousTitulars = { ...titulars }
+        const nousSuplents = { ...suplents }
 
         if (seleccionat.tipus === 'titular') {
             // Intercanvi entre dos slots
@@ -162,43 +221,69 @@ export default function Equip() {
             else delete nousTitulars[seleccionat.key]
 
         } else if (seleccionat.tipus === 'banqueta') {
-            // De banqueta a titular - el titular anterior torna a banqueta automaticament
-            nousTitulars[key] = seleccionat.id
-            if (!jugadorActualId) {
-                // slot buit, simplement posem
+            // De banqueta a titular - el titular anterior ocupa el mateix slot de banqueta
+            if (jugadorActual && jugadorActual.posicion !== seleccionat.posicio) {
+                alert(`${jugadorActual.nombre} és ${jugadorActual.posicion} i no pot anar al slot de ${seleccionat.posicio}`)
+                setSeleccionat(null)
+                return
             }
-            // Si hi havia titular, ja no es a titulars -> va a banqueta automaticament
-            if (jugadorActualId) delete nousTitulars[key]
+
+            if (jugadorActualId) nousSuplents[seleccionat.key] = jugadorActualId
+            else delete nousSuplents[seleccionat.key]
             nousTitulars[key] = seleccionat.id
         }
 
         setTitulars(nousTitulars)
+        setSuplents(nousSuplents)
         setSeleccionat(null)
-        desarAuto(nousTitulars)
+        desarAuto(nousTitulars, undefined, nousSuplents)
     }
 
-    function handleClickBanqueta(jugador) {
+    function handleClickBanqueta(posicio, index) {
+        const key = `${posicio}_${index}`
+        const jugadorId = suplents[key]
+        const jugador = jugadors.find(j => j.id === jugadorId)
+
         if (!seleccionat) {
-            setSeleccionat({ tipus: 'banqueta', id: jugador.id })
+            if (jugador) setSeleccionat({ tipus: 'banqueta', key, posicio, id: jugador.id })
             return
         }
 
         // Deseleccionar si cliquem el mateix
-        if (seleccionat.id === jugador.id) { setSeleccionat(null); return }
+        if (seleccionat.key === key) { setSeleccionat(null); return }
 
         if (seleccionat.tipus === 'titular') {
-            // Titular -> banqueta: simplement treiem el titular del camp
+            const jugadorTitular = jugadors.find(j => j.id === seleccionat.id)
+            if (!jugadorTitular || jugadorTitular.posicion !== posicio) {
+                alert('Aquest slot de banqueta nomes accepta jugadors de la mateixa posicio')
+                setSeleccionat(null)
+                return
+            }
+
             const nousTitulars = { ...titulars }
+            const nousSuplents = { ...suplents }
+
+            if (jugadorId && !potJugarDe(jugador, seleccionat.posicio)) {
+                alert(`${jugador.nombre} no pot ocupar aquest slot titular`)
+                setSeleccionat(null)
+                return
+            }
+
             delete nousTitulars[seleccionat.key]
+            nousSuplents[key] = seleccionat.id
+            if (jugadorId && potJugarDe(jugador, seleccionat.posicio)) {
+                nousTitulars[seleccionat.key] = jugadorId
+            }
             setTitulars(nousTitulars)
+            setSuplents(nousSuplents)
             setSeleccionat(null)
-            desarAuto(nousTitulars)
+            desarAuto(nousTitulars, undefined, nousSuplents)
             return
         }
 
         if (seleccionat.tipus === 'banqueta') {
             // Canvi de seleccio dins banqueta
-            setSeleccionat({ tipus: 'banqueta', id: jugador.id })
+            setSeleccionat(jugador ? { tipus: 'banqueta', key, posicio, id: jugador.id } : null)
             return
         }
 
@@ -206,8 +291,11 @@ export default function Equip() {
     }
 
     const formacioActual = FORMACIONS[formacio]
-    const titularsIds = Object.values(titulars).filter(Boolean)
-    const jugadorsLliures = jugadors.filter(j => !titularsIds.includes(j.id))
+
+    function getBanquetaJugador(posicio, index) {
+        const id = suplents[`${posicio}_${index}`]
+        return jugadors.find(j => j.id === id) || null
+    }
 
     function renderSlot(posicio, index) {
         const key = `${posicio}_${index}`
@@ -295,8 +383,8 @@ export default function Equip() {
                     {/* Camp de futbol */}
                     <div className="relative rounded-xl overflow-hidden flex-shrink-0"
                          style={{
-                             width: 320,
-                             height: 480,
+                             width: 380,
+                             height: 560,
                              backgroundImage: `
                 repeating-linear-gradient(180deg,
                   rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 40px,
@@ -327,7 +415,7 @@ export default function Equip() {
                             <circle cx="160" cy="425" r="2.5" fill="rgba(255,255,255,0.4)"/>
                         </svg>
 
-                        <div className="absolute inset-0 flex flex-col justify-between" style={{ padding: '20px 10px' }}>
+                        <div className="absolute inset-0 flex flex-col justify-between" style={{ padding: '24px 18px' }}>
                             <div className="flex justify-around items-center">
                                 {Array.from({ length: formacioActual.Davanter }).map((_, i) => renderSlot('Davanter', i))}
                             </div>
@@ -363,53 +451,44 @@ export default function Equip() {
                             </div>
                         )}
 
-                        {/* Banqueta */}
+                        {/* Banqueta per posicions i prioritat */}
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 overflow-y-auto" style={{ maxHeight: 420 }}>
-                            <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                                Banqueta ({jugadorsLliures.length})
+                            <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">
+                                Banqueta ({Object.values(suplents).filter(Boolean).length})
                             </p>
-                            {jugadorsLliures.length === 0 ? (
-                                <p className="text-gray-600 text-xs text-center py-6">Tots els jugadors col·locats! 🎉</p>
-                            ) : (
-                                <div className="space-y-1">
-                                    {['Porter', 'Defensa', 'Migcampista', 'Davanter'].map(pos => {
-                                        const delPos = jugadorsLliures.filter(j => j.posicion === pos)
-                                        if (!delPos.length) return null
-                                        return (
-                                            <div key={pos}>
-                                                <p className="text-gray-600 text-[10px] uppercase tracking-wider mt-2 mb-1">{pos}s</p>
-                                                {delPos.map(j => {
-                                                    const colors = POS_COLORS[j.posicion]
-                                                    const esSelec = seleccionat?.id === j.id
-                                                    return (
-                                                        <div key={j.id} onClick={() => handleClickBanqueta(j)}
-                                                             className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all mb-1
-                                ${esSelec ? `${colors.light} border ${colors.border}` : 'hover:bg-gray-800'}`}>
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${colors.bg} ${colors.text}`}>
-                                {pos.slice(0, 3).toUpperCase()}
-                              </span>
-                                                            {j.foto
-                                                                ? <img src={j.foto} alt={j.nombre}
-                                                                       className="w-7 h-7 rounded-full object-cover flex-shrink-0 bg-gray-700"
-                                                                       onError={e => { e.target.style.display='none' }} />
-                                                                : null
+
+                            {Object.entries(BANQUETA_SLOTS).map(([posicio, totalSlots]) => {
+                                const colors = POS_COLORS[posicio]
+
+                                return (
+                                    <div key={posicio} className="mb-3 last:mb-0">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">{posicio}</p>
+                                        </div>
+
+                                        <div className="flex gap-2 flex-wrap">
+                                            {Array.from({ length: totalSlots }).map((_, index) => {
+                                                const jugador = getBanquetaJugador(posicio, index)
+                                                const esSelec = jugador && seleccionat?.id === jugador.id
+                                                return (
+                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 62 }}>
+                                                        <div
+                                                            onClick={() => handleClickBanqueta(posicio, index)}
+                                                            className={`w-12 h-12 rounded-full border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
+                                                        >
+                                                            {jugador
+                                                                ? <span className={`text-[9px] font-bold ${colors.text} text-center px-1`}>{nomCurt(jugador.nombre)}</span>
+                                                                : <span className="text-white/25 text-sm">{index + 1}</span>
                                                             }
-                                                            <span className="text-white text-xs font-medium flex-1 truncate">{j.nombre}</span>
-                                                            <div className="flex items-center gap-1 hidden md:flex">
-                                                                {j.escudo_equip && (
-                                                                    <img src={j.escudo_equip} alt="" className="w-4 h-4 object-contain"
-                                                                         onError={e => { e.target.style.display='none' }} />
-                                                                )}
-                                                                <span className="text-gray-500 text-[10px] truncate">{j.equipo_real}</span>
-                                                            </div>
                                                         </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
+                                                        <span className="text-[10px] text-gray-500 mt-1">#{index + 1}</span>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                )
+                            })}
                         </div>
                     </div>
                 </div>
@@ -422,3 +501,63 @@ export default function Equip() {
         </>
     )
 }
+
+function autoOmplirPlantilla(players, formacioActiva, titularsActuals = {}, suplentsActuals = {}) {
+    const jugadorsPerId = new Map((players || []).map(p => [p.id, p]))
+    const idsUtilitzats = new Set()
+    const nousTitulars = {}
+    const nousSuplents = {}
+
+    ORDRE_POSICIONS.forEach(posicio => {
+        const total = FORMACIONS[formacioActiva]?.[posicio] || 0
+        for (let i = 0; i < total; i++) {
+            const key = `${posicio}_${i}`
+            const idActual = titularsActuals[key]
+            const jugadorActual = jugadorsPerId.get(idActual)
+            if (jugadorActual && jugadorActual.posicion === posicio && !idsUtilitzats.has(idActual)) {
+                nousTitulars[key] = idActual
+                idsUtilitzats.add(idActual)
+            }
+        }
+    })
+
+    ORDRE_POSICIONS.forEach(posicio => {
+        const total = FORMACIONS[formacioActiva]?.[posicio] || 0
+        for (let i = 0; i < total; i++) {
+            const key = `${posicio}_${i}`
+            if (nousTitulars[key]) continue
+            const candidat = players.find(p => p.posicion === posicio && !idsUtilitzats.has(p.id))
+            if (candidat) {
+                nousTitulars[key] = candidat.id
+                idsUtilitzats.add(candidat.id)
+            }
+        }
+    })
+
+    Object.entries(BANQUETA_SLOTS).forEach(([posicio, total]) => {
+        for (let i = 0; i < total; i++) {
+            const key = `${posicio}_${i}`
+            const idActual = suplentsActuals[key]
+            const jugadorActual = jugadorsPerId.get(idActual)
+            if (jugadorActual && jugadorActual.posicion === posicio && !idsUtilitzats.has(idActual)) {
+                nousSuplents[key] = idActual
+                idsUtilitzats.add(idActual)
+            }
+        }
+    })
+
+    Object.entries(BANQUETA_SLOTS).forEach(([posicio, total]) => {
+        for (let i = 0; i < total; i++) {
+            const key = `${posicio}_${i}`
+            if (nousSuplents[key]) continue
+            const candidat = players.find(p => p.posicion === posicio && !idsUtilitzats.has(p.id))
+            if (candidat) {
+                nousSuplents[key] = candidat.id
+                idsUtilitzats.add(candidat.id)
+            }
+        }
+    })
+
+    return { nousTitulars, nousSuplents }
+}
+
