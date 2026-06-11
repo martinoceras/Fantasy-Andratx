@@ -305,7 +305,8 @@ export default function Equip() {
         const esSeleccionat = seleccionat?.key === key || (jugadorId && seleccionat?.id === jugadorId)
         const jugadorMovent = seleccionat ? jugadors.find(j => j.id === seleccionat?.id) : null
         const esCompatible = jugadorMovent ? potJugarDe(jugadorMovent, posicio) : false
-        const mostraDestinacio = seleccionat && !esSeleccionat && esCompatible && !jugadorId
+        const mostraCanviPossible = seleccionat && !esSeleccionat && esCompatible
+        const mostraDestinacio = mostraCanviPossible && !jugadorId
 
         return (
             <div key={key} className="flex flex-col items-center" style={{ width: 64 }}>
@@ -320,9 +321,9 @@ export default function Equip() {
                             ? 'border-dashed border-white bg-white/15 animate-pulse'
                             : 'border-dashed border-white/20 bg-black/20'
                     }
-            ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : 'hover:scale-105'}
+            ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : mostraCanviPossible ? `ring-2 ${POS_RING_COMPAT[posicio]} shadow-md` : 'hover:scale-105'}
           `}
-                >
+                 >
                     {jugador ? (
                         jugador.foto
                             ? <img src={jugador.foto} alt={jugador.nombre}
@@ -330,7 +331,7 @@ export default function Equip() {
                                    onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex' }} />
                             : <span className={`text-[10px] font-bold ${colors.text} text-center leading-tight px-0.5`}>{nomCurt(jugador.nombre)}</span>
                     ) : (
-                        <span className="text-white/20 text-xl">+</span>
+                        <span className="text-white/25 text-base">+</span>
                     )}
                 </div>
                 <span className="text-white/70 text-[10px] mt-1 text-center w-16 truncate font-medium">
@@ -466,12 +467,12 @@ export default function Equip() {
                                             <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">{posicio}</p>
                                         </div>
 
-                                        <div className="flex gap-3 flex-wrap">
+                                        <div className="flex gap-3 flex-wrap justify-center w-full">
                                             {Array.from({ length: totalSlots }).map((_, index) => {
                                                 const jugador = getBanquetaJugador(posicio, index)
                                                 const esSelec = jugador && seleccionat?.id === jugador.id
                                                 return (
-                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 72 }}>
+                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 74 }}>
                                                         <div
                                                             onClick={() => handleClickBanqueta(posicio, index)}
                                                             className={`w-14 h-14 rounded-full border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
@@ -559,4 +560,11 @@ function autoOmplirPlantilla(players, formacioActiva, titularsActuals = {}, supl
     })
 
     return { nousTitulars, nousSuplents }
+}
+
+const POS_RING_COMPAT = {
+    Porter: 'ring-yellow-300/80',
+    Defensa: 'ring-blue-300/80',
+    Migcampista: 'ring-green-300/80',
+    Davanter: 'ring-red-300/80',
 }
