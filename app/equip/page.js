@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import Link from 'next/link'
 import Navbar from '../components/Navbar'
+import BiwengerAvatar from '../components/BiwengerAvatar'
 
 const TEMPORADA = '2026-27'
 
@@ -309,14 +310,14 @@ export default function Equip() {
         const mostraDestinacio = mostraCanviPossible && !jugadorId
 
         return (
-            <div key={key} className="flex flex-col items-center" style={{ width: 64 }}>
+            <div key={key} className="flex flex-col items-center" style={{ width: 76 }}>
                 <div
                     onClick={() => handleClickSlot(posicio, index)}
                     className={`
-            w-14 h-14 rounded-full border-2 flex items-center justify-center cursor-pointer
+            w-16 h-16 border-2 flex items-center justify-center cursor-pointer
             transition-all duration-150 select-none
             ${jugador
-                        ? `${colors.bg} ${colors.border}`
+                        ? `${colors.light} ${colors.border}`
                         : mostraDestinacio
                             ? 'border-dashed border-white bg-white/15 animate-pulse'
                             : 'border-dashed border-white/20 bg-black/20'
@@ -325,16 +326,19 @@ export default function Equip() {
           `}
                  >
                     {jugador ? (
-                        jugador.foto
-                            ? <img src={jugador.foto} alt={jugador.nombre}
-                                   className="w-full h-full rounded-full object-cover"
-                                   onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex' }} />
-                            : <span className={`text-[10px] font-bold ${colors.text} text-center leading-tight px-0.5`}>{nomCurt(jugador.nombre)}</span>
+                        <BiwengerAvatar
+                            key={`tit_${jugador.id}_${jugador.foto || ''}`}
+                            player={jugador}
+                            alt={jugador.nombre}
+                            className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+                            fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
+                            initialClassName={`text-[10px] font-bold ${colors.text}`}
+                        />
                     ) : (
                         <span className="text-white/25 text-base">+</span>
                     )}
                 </div>
-                <span className="text-white/70 text-[10px] mt-1 text-center w-16 truncate font-medium">
+                <span className="text-white/80 text-[10px] mt-1 text-center w-20 truncate font-medium">
           {jugador ? nomCurt(jugador.nombre) : <span className="text-white/20 text-[9px]">{posicio.slice(0,3)}</span>}
         </span>
             </div>
@@ -472,13 +476,20 @@ export default function Equip() {
                                                 const jugador = getBanquetaJugador(posicio, index)
                                                 const esSelec = jugador && seleccionat?.id === jugador.id
                                                 return (
-                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 74 }}>
+                                                    <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 82 }}>
                                                         <div
                                                             onClick={() => handleClickBanqueta(posicio, index)}
-                                                            className={`w-14 h-14 rounded-full border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
+                                                            className={`w-16 h-16 border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
                                                         >
                                                             {jugador
-                                                                ? <span className={`text-[10px] font-bold ${colors.text} text-center px-1`}>{nomCurt(jugador.nombre)}</span>
+                                                                ? <BiwengerAvatar
+                                                                    key={`banq_${jugador.id}_${jugador.foto || ''}`}
+                                                                    player={jugador}
+                                                                    alt={jugador.nombre}
+                                                                    className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+                                                                    fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
+                                                                    initialClassName={`text-[10px] font-bold ${colors.text}`}
+                                                                />
                                                                 : <span className="text-white/25 text-base">{index + 1}</span>
                                                             }
                                                         </div>

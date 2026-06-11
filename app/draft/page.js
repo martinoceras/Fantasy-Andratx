@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import Navbar from '../components/Navbar'
+import BiwengerAvatar from '../components/BiwengerAvatar'
 
 const POS_COLORS = {
     Porter:      { bg: 'bg-yellow-500', text: 'text-yellow-900' },
@@ -348,14 +349,12 @@ export default function Draft() {
                         <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold ${colors.bg} ${colors.text}`}>
                             {player.nombre?.charAt(0)}
                         </div>
-                        {player.foto && (
-                            <img
-                                src={player.foto}
-                                alt={player.nombre}
-                                className="w-12 h-12 rounded-full object-cover absolute inset-0"
-                                onError={e => { e.target.style.display = 'none' }}
-                            />
-                        )}
+                        <BiwengerAvatar
+                            key={`draft_${player.id}_${player.foto || ''}`}
+                            player={player}
+                            alt={player.nombre}
+                            className="w-12 h-12 object-contain absolute inset-0"
+                        />
                     </div>
                     <div className="min-w-0 flex-1">
                         <div className="font-bold text-sm text-white truncate">{player.nombre}</div>

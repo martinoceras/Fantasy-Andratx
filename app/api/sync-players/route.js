@@ -6,7 +6,7 @@ const supabaseAdmin = createClient(
 )
 
 const BIWENGER_URL  = 'https://cf.biwenger.com/api/v2/competitions/la-liga/data?lang=ca&score=2'
-const FOTO_BASE     = 'https://biwenger.as.com/res/images/players/icon_'   // + id + .png
+const FOTO_BASE     = 'https://cdn.biwenger.com/i/p/'   // + id + .png
 const ESCUDO_BASE   = 'https://biwenger.as.com/res/images/clubs/badge_'    // + teamId + .png
 
 const POS_MAP = { 1: 'Porter', 2: 'Defensa', 3: 'Migcampista', 4: 'Davanter' }
@@ -50,7 +50,7 @@ async function doSync() {
                 precio:        p.price ?? p.fantasyPrice ?? 0,
                 punts_totals:  p.points ?? 0,
                 status:        typeof p.status === 'string' ? p.status : 'ok',
-                // Foto garantida: URL pública sense dependre del camp iconHero
+                // Foto principal via CDN actual.
                 foto:          `${FOTO_BASE}${p.id}.png`,
                 escudo_equip:  teamId ? `${ESCUDO_BASE}${teamId}.png` : null,
             }
