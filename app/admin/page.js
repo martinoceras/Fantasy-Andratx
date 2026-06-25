@@ -1,9 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
-const ADMIN_EMAIL   = 'martinoceras@gmail.com'
 const ADMIN_USER    = 'admin'
 const ADMIN_PASS    = 'fantasy-andratx'
 
@@ -81,7 +80,7 @@ export default function Admin() {
         }
     }
 
-    async function fetchTot() {
+    const fetchTot = useCallback(async () => {
         // Llegir usuaris via API amb service key (evita bloqueig RLS al client)
         const resUsers = await fetch('/api/admin/get-users')
         const usersPayload = await resUsers.json()
@@ -100,14 +99,14 @@ export default function Admin() {
         setClassificacionsArxivades(classData || [])
         await carregarPicksDraft()
         setLoading(false)
-    }
+    }, [])
 
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => {
             setUser(data.user)
             void fetchTot()
         })
-    }, [])
+    }, [fetchTot])
 
     async function calcularClassificacioActual(perfils) {
         const { data: allPunts } = await supabase.from('player_punts').select('player_id, punts')
@@ -137,11 +136,21 @@ export default function Admin() {
                 jornada_final: jornadaFinalVolta,
                 classificacio: classActual,
             })
-            if (errGuardar) throw new Error(errGuardar.message)
+            if (errGuardar) {
+                setMissatgeClass('❌ Error: ' + errGuardar.message)
+                setGuardantClass(false)
+                setTimeout(() => setMissatgeClass(''), 6000)
+                return
+            }
 
             // 3. Reiniciar tots els punts (eliminar tots els player_punts)
             const { error: errDelete } = await supabase.from('player_punts').delete().neq('id', 0)
-            if (errDelete) throw new Error(errDelete.message)
+            if (errDelete) {
+                setMissatgeClass('❌ Error: ' + errDelete.message)
+                setGuardantClass(false)
+                setTimeout(() => setMissatgeClass(''), 6000)
+                return
+            }
 
             setMissatgeClass(`✅ Classificació "${nomVolta}" guardada i punts reiniciats a 0!`)
             await fetchTot()
@@ -272,7 +281,12 @@ export default function Admin() {
                 headers: { 'Content-Type': 'application/json' },
             })
             const data = await res.json()
-            if (!res.ok || data.error) throw new Error(data.error || 'No s’ha pogut reiniciar el draft')
+            if (!res.ok || data.error) {
+                setMissatge('❌ Error: ' + (data.error || 'No s’ha pogut reiniciar el draft'))
+                setResetantDraft(false)
+                setTimeout(() => setMissatge(''), 5000)
+                return
+            }
 
             setOrdre([])
             setMissatge('🔄 Draft reiniciat: s’han esborrat tots els picks i s’han buidat els equips.')
@@ -301,10 +315,23 @@ export default function Admin() {
 
     async function eliminarUsuari(userId, email) {
         if (!confirm(`Eliminar usuari ${email}?`)) return
-        await supabase.from('draft_picks').delete().eq('user_id', userId)
-        await supabase.from('profiles').delete().eq('id', userId)
-        setMissatge('Usuari eliminat.')
-        fetchTot()
+        try {
+            const res = await fetch('/api/admin/delete-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId }),
+            })
+            const data = await res.json()
+            if (!res.ok || data.error) {
+                setMissatge('❌ Error: ' + (data.error || 'No s\'ha pogut eliminar l\'usuari'))
+                return
+            }
+
+            setMissatge('✅ Usuari eliminat.')
+            await fetchTot()
+        } catch (e) {
+            setMissatge('❌ Error: ' + e.message)
+        }
         setTimeout(() => setMissatge(''), 3000)
     }
 
@@ -334,7 +361,10 @@ export default function Admin() {
                 body: JSON.stringify({ userId: usuariEditant.id, nom }),
             })
             const data = await res.json()
-            if (!res.ok || data.error) throw new Error(data.error || 'No s\'ha pogut editar l\'usuari')
+            if (!res.ok || data.error) {
+                setMissatge('❌ Error: ' + (data.error || 'No s\'ha pogut editar l\'usuari'))
+                return
+            }
 
             setMissatge('✏️ Nom d\'usuari actualitzat.')
             await fetchTot()
@@ -359,6 +389,22 @@ export default function Admin() {
         return Array.from({ length: rondesTotals }).flatMap((_, rondaIndex) => (
             rondaIndex % 2 === 0 ? baseOrdre : [...baseOrdre].reverse()
         ))
+    }
+
+    function isMissingCanvisPicksError(error) {
+        const msg = (error?.message || '').toLowerCase()
+        return msg.includes('canvis_picks') && (
+            msg.includes('could not find the table') ||
+            msg.includes('does not exist') ||
+            msg.includes('schema cache')
+        )
+    }
+
+    async function netejarCanvisPicksSiExisteix() {
+        const { error } = await supabase.from('canvis_picks').delete().neq('id', 0)
+        if (error && !isMissingCanvisPicksError(error)) {
+            throw new Error(error.message)
+        }
     }
 
     async function sincronitzarJugadors() {
@@ -427,7 +473,7 @@ export default function Admin() {
             const ordre = generarOrdreSerpentina(ordreBase, 1)
 
             // 2. Reiniciar picks i crear o actualitzar registre de canvis
-            await supabase.from('canvis_picks').delete().neq('id', 0)
+            await netejarCanvisPicksSiExisteix()
             const { data: existing } = await supabase.from('canvis').select('id')
                 .order('created_at', { ascending: false }).limit(1).single()
 
@@ -473,7 +519,7 @@ export default function Admin() {
             const ordreBase = userPunts.map(u => u.userId)
             const ordre = generarOrdreSerpentina(ordreBase, 3)
 
-            await supabase.from('canvis_picks').delete().neq('id', 0)
+            await netejarCanvisPicksSiExisteix()
             const { data: existing } = await supabase.from('canvis').select('id')
                 .order('created_at', { ascending: false }).limit(1).single()
 

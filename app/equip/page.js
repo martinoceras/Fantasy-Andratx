@@ -71,7 +71,10 @@ export default function Equip() {
         const { data: picks } = await supabase.from('draft_picks').select('player_id').eq('user_id', userId)
         if (picks?.length) {
             const { data: players } = await supabase.from('players').select('*').in('id', picks.map(p => p.player_id))
-            setJugadors(players || [])
+            setJugadors((players || []).map(p => ({
+                ...p,
+                equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
+            })))
             const { data: teamData } = await supabase.from('teams').select('*').eq('user_id', userId).single()
             const formacioActual = teamData?.formacio || '4-4-2'
             const titularsActuals = teamData?.alineacio || {}
@@ -118,7 +121,7 @@ export default function Equip() {
             if (!data.user) router.push('/login')
             else { setUser(data.user); fetchTot(data.user.id) }
         })
-    }, [])
+    }, [router])
 
     async function desarAuto(nousTitulars, novaFormacio, nousSuplents) {
         if (!user) return
@@ -308,13 +311,23 @@ export default function Equip() {
         const esCompatible = jugadorMovent ? potJugarDe(jugadorMovent, posicio) : false
         const mostraCanviPossible = seleccionat && !esSeleccionat && esCompatible
         const mostraDestinacio = mostraCanviPossible && !jugadorId
+        const maxFila = Math.max(
+            formacioActual.Davanter,
+            formacioActual.Migcampista,
+            formacioActual.Defensa,
+            formacioActual.Porter
+        )
+        const slotSize = maxFila >= 5 ? 56 : 64
+        const outerWidth = maxFila >= 5 ? 68 : 76
+        const labelWidth = maxFila >= 5 ? 72 : 80
+        const initialText = maxFila >= 5 ? 'text-[9px] font-bold' : 'text-[10px] font-bold'
 
         return (
-            <div key={key} className="flex flex-col items-center" style={{ width: 76 }}>
+            <div key={key} className="flex flex-col items-center" style={{ width: outerWidth }}>
                 <div
                     onClick={() => handleClickSlot(posicio, index)}
                     className={`
-            w-16 h-16 border-2 flex items-center justify-center cursor-pointer
+            border-2 flex items-center justify-center cursor-pointer
             transition-all duration-150 select-none
             ${jugador
                         ? `${colors.light} ${colors.border}`
@@ -324,6 +337,7 @@ export default function Equip() {
                     }
             ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : mostraCanviPossible ? `ring-2 ${POS_RING_COMPAT[posicio]} shadow-md` : 'hover:scale-105'}
           `}
+                    style={{ width: slotSize, height: slotSize }}
                  >
                     {jugador ? (
                         <BiwengerAvatar
@@ -332,13 +346,13 @@ export default function Equip() {
                             alt={jugador.nombre}
                             className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
                             fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
-                            initialClassName={`text-[10px] font-bold ${colors.text}`}
+                            initialClassName={`${initialText} ${colors.text}`}
                         />
                     ) : (
                         <span className="text-white/25 text-base">+</span>
                     )}
                 </div>
-                <span className="text-white/80 text-[10px] mt-1 text-center w-20 truncate font-medium">
+                <span className="text-white/80 text-[10px] mt-1 text-center truncate font-medium" style={{ width: labelWidth }}>
           {jugador ? nomCurt(jugador.nombre) : <span className="text-white/20 text-[9px]">{posicio.slice(0,3)}</span>}
         </span>
             </div>

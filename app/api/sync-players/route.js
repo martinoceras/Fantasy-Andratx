@@ -45,7 +45,7 @@ async function doSync() {
                 id:            p.id,
                 nombre:        p.name,
                 posicion:      POS_MAP[p.position],
-                equipo_real:   teamNames[teamId] || 'Desconegut',
+                equipo_real:   teamNames[teamId] || 'Transferits',
                 valor:         calcValor(p.price ?? p.fantasyPrice),
                 precio:        p.price ?? p.fantasyPrice ?? 0,
                 punts_totals:  p.points ?? 0,
@@ -62,6 +62,14 @@ async function doSync() {
         .upsert(jugadors, { onConflict: 'id' })
 
     if (error) throw new Error(error.message)
+
+    // Neteja dades antigues que ja s'havien guardat com a 'Desconegut'
+    const { error: updateError } = await supabaseAdmin
+        .from('players')
+        .update({ equipo_real: 'Transferits' })
+        .eq('equipo_real', 'Desconegut')
+
+    if (updateError) throw new Error(updateError.message)
     return jugadors.length
 }
 
@@ -91,5 +99,4 @@ export async function GET(request) {
         return Response.json({ error: err.message }, { status: 500 })
     }
 }
-
 

@@ -1,7 +1,9 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import Image from 'next/image'
 import { supabase } from '../../lib/supabase'
 import Navbar from '../components/Navbar'
+import BiwengerAvatar from '../components/BiwengerAvatar'
 
 const POS_COLORS = {
     Porter:      { bg: 'bg-yellow-400', text: 'text-yellow-900' },
@@ -11,6 +13,15 @@ const POS_COLORS = {
 }
 
 const posicions = ['Porter', 'Defensa', 'Migcampista', 'Davanter']
+
+function isMissingCanvisPicksError(error) {
+    const msg = (error?.message || '').toLowerCase()
+    return msg.includes('canvis_picks') && (
+        msg.includes('could not find the table') ||
+        msg.includes('does not exist') ||
+        msg.includes('schema cache')
+    )
+}
 
 function obtenirMetadadesSerpentina(ordre) {
     if (!ordre.length) return { midaRonda: 0, totalRondes: 0 }
@@ -78,6 +89,52 @@ export default function Canvis() {
     const [cerca, setCerca]               = useState('')
     const [posicioFiltro, setPosicioFiltro] = useState('Tots')
 
+    const fetchCanvis = useCallback(async () => {
+        const { data } = await supabase.from('canvis').select('*')
+            .order('created_at', { ascending: false }).limit(1).single()
+        setCanvisData(data)
+    }, [])
+
+    const fetchParticipants = useCallback(async () => {
+        const { data } = await supabase.from('profiles').select('id, nom, email')
+        setParticipants(data || [])
+    }, [])
+
+    const fetchPlayers = useCallback(async () => {
+        const { data } = await supabase.from('players').select('*').order('posicion').order('nombre')
+        setPlayers((data || []).map(p => ({
+            ...p,
+            equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
+        })))
+    }, [])
+
+    const fetchMeusPicks = useCallback(async (userId) => {
+        const { data } = await supabase.from('draft_picks').select('player_id').eq('user_id', userId)
+        setMeusPicks(data?.map(p => p.player_id) || [])
+    }, [])
+
+    const fetchTotsElsPicks = useCallback(async () => {
+        const { data } = await supabase.from('draft_picks').select('player_id, user_id')
+        setTotsElsPicks(data || [])
+    }, [])
+
+    const fetchCanvisPicks = useCallback(async () => {
+        const { data, error } = await supabase.from('canvis_picks').select('*').order('torn')
+        if (error && isMissingCanvisPicksError(error)) {
+            setCanvisPicks([])
+            return
+        }
+        setCanvisPicks(data || [])
+    }, [])
+
+    const fetchTot = useCallback(async (userId) => {
+        await Promise.all([
+            fetchCanvis(), fetchParticipants(), fetchPlayers(),
+            fetchMeusPicks(userId), fetchTotsElsPicks(), fetchCanvisPicks()
+        ])
+        setLoading(false)
+    }, [fetchCanvis, fetchCanvisPicks, fetchMeusPicks, fetchParticipants, fetchPlayers, fetchTotsElsPicks])
+
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => {
             if (!data.user) return
@@ -86,57 +143,24 @@ export default function Canvis() {
         })
         const canal = supabase.channel('canvis-canal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'canvis' }, () => fetchCanvis())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'canvis_picks' }, () => {
-                fetchCanvisPicks()
-                supabase.auth.getUser().then(({ data }) => data.user && fetchMeusPicks(data.user.id))
-            })
             .subscribe()
         return () => supabase.removeChannel(canal)
-    }, [])
-
-    async function fetchTot(userId) {
-        await Promise.all([
-            fetchCanvis(), fetchParticipants(), fetchPlayers(),
-            fetchMeusPicks(userId), fetchTotsElsPicks(), fetchCanvisPicks()
-        ])
-        setLoading(false)
-    }
-
-    async function fetchCanvis() {
-        const { data } = await supabase.from('canvis').select('*')
-            .order('created_at', { ascending: false }).limit(1).single()
-        setCanvisData(data)
-    }
-    async function fetchParticipants() {
-        const { data } = await supabase.from('profiles').select('id, nom, email')
-        setParticipants(data || [])
-    }
-    async function fetchPlayers() {
-        const { data } = await supabase.from('players').select('*').order('posicion').order('nombre')
-        setPlayers(data || [])
-    }
-    async function fetchMeusPicks(userId) {
-        const { data } = await supabase.from('draft_picks').select('player_id').eq('user_id', userId)
-        setMeusPicks(data?.map(p => p.player_id) || [])
-    }
-    async function fetchTotsElsPicks() {
-        const { data } = await supabase.from('draft_picks').select('player_id, user_id')
-        setTotsElsPicks(data || [])
-    }
-    async function fetchCanvisPicks() {
-        const { data } = await supabase.from('canvis_picks').select('*').order('torn')
-        setCanvisPicks(data || [])
-    }
+    }, [fetchCanvis, fetchCanvisPicks, fetchMeusPicks, fetchParticipants, fetchPlayers, fetchTot, fetchTotsElsPicks])
 
     async function ferCanvi() {
         if (!playerOut || !playerIn || !canvisData || !user) return
         setConfirmant(true)
         try {
-            await supabase.from('canvis_picks').insert({
+            const { error: errHistorial } = await supabase.from('canvis_picks').insert({
                 canvi_id: canvisData.id, user_id: user.id,
                 player_out: playerOut.id, player_in: playerIn.id,
                 torn: canvisData.torn_actual
             })
+            if (errHistorial && !isMissingCanvisPicksError(errHistorial)) {
+                console.error(errHistorial)
+                setConfirmant(false)
+                return
+            }
             await supabase.from('draft_picks').delete().eq('user_id', user.id).eq('player_id', playerOut.id)
             await supabase.from('draft_picks').insert({ user_id: user.id, player_id: playerIn.id, torn: -1 })
 
@@ -206,46 +230,8 @@ export default function Canvis() {
                         </div>
                     )}
 
-                    {/* ACTIU */}
                     {canvisData?.estat === 'actiu' && (
                         <>
-                            {/* Banner */}
-                            <div className={`rounded-xl p-3 mb-5 text-center border ${esMeuTorn && !jaHeCanviat ? 'bg-blue-900/50 border-blue-500 animate-pulse' : 'bg-gray-900 border-gray-700'}`}>
-                                <p className="text-xs text-gray-400 mb-0.5">
-                                    Torn {tornActual + 1} de {ordre.length}
-                                    {totalRondes > 1 && midaRonda ? ` · Ronda ${rondaActual + 1} de ${totalRondes}` : ''}
-                                </p>
-                                {esMeuTorn && !jaHeCanviat
-                                    ? <p className="text-blue-300 font-bold text-lg">🔄 És el teu torn! Selecciona el teu canvi</p>
-                                    : jaHeCanviat
-                                        ? <p className="text-green-400 font-semibold">✅ Ja has realitzat el teu canvi aquesta ronda</p>
-                                        : <p className="text-white font-semibold">⏳ Esperant que <span className="text-yellow-400">{nomActual}</span> faci el seu canvi...</p>
-                                }
-                            </div>
-
-                            {/* Progrés */}
-                            <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-5">
-                                <p className="text-gray-500 text-xs uppercase tracking-wider mb-2 font-semibold">
-                                    Ordre {totalRondes > 1 ? `(serpentina ${totalRondes} rondes)` : '(invers classificació general)'}
-                                </p>
-                                <div className="flex flex-wrap gap-2">
-                                    {ordre.map((uid, idx) => {
-                                        const part = participants.find(p => p.id === uid)
-                                        const fet = canvisPicks.some(c => c.torn === idx)
-                                        const cur = idx === tornActual
-                                        const rondaBadge = midaRonda ? Math.floor(idx / midaRonda) + 1 : 1
-                                        return (
-                                            <span key={uid} className={`text-xs px-3 py-1.5 rounded-full font-medium border
-                                                ${fet ? 'bg-green-900/40 border-green-700 text-green-300' :
-                                                  cur ? 'bg-blue-600 border-blue-400 text-white' :
-                                                        'bg-gray-800 border-gray-700 text-gray-400'}`}>
-                                                {fet ? '✓ ' : cur ? '→ ' : ''}
-                                                {part?.nom || uid.slice(0, 8)}{totalRondes > 1 ? ` · R${rondaBadge}` : ''}{uid === user?.id ? ' (tu)' : ''}
-                                            </span>
-                                        )
-                                    })}
-                                </div>
-                            </div>
 
                             {/* Selecció (només si és el meu torn) */}
                             {esMeuTorn && !jaHeCanviat && (
@@ -270,10 +256,10 @@ export default function Canvis() {
                                                                 <button key={j.id} onClick={() => setPlayerOut(playerOut?.id === j.id ? null : j)}
                                                                         className={`w-full flex items-center gap-2 p-2.5 rounded-lg border transition mb-1 text-left
                                                                             ${playerOut?.id === j.id ? 'bg-red-900/50 border-red-500 ring-1 ring-red-400' : 'bg-gray-800 border-gray-700 hover:bg-red-900/20 hover:border-red-900'}`}>
-                                                                    {j.foto
-                                                                        ? <img src={j.foto} alt={j.nombre} className="w-8 h-8 rounded-full object-cover flex-shrink-0 bg-gray-700" onError={e => { e.target.style.display = 'none' }} />
-                                                                        : <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${colors.bg} ${colors.text}`}>{j.nombre?.charAt(0)}</div>
-                                                                    }
+                                                                                                            {j.foto
+                                                                                                                ? <BiwengerAvatar player={j} alt={j.nombre} className="w-8 h-8 rounded-full object-cover flex-shrink-0 bg-gray-700" />
+                                                                                                                : <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${colors.bg} ${colors.text}`}>{j.nombre?.charAt(0)}</div>
+                                                                                                            }
                                                                     <span className="text-white text-sm flex-1 truncate font-medium">{j.nombre}</span>
                                                                     <span className="text-gray-500 text-xs hidden md:block truncate max-w-20">{j.equipo_real}</span>
                                                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${colors.bg} ${colors.text}`}>{pos.slice(0,3).toUpperCase()}</span>
@@ -311,10 +297,10 @@ export default function Canvis() {
                                                             <button key={j.id} onClick={() => setPlayerIn(playerIn?.id === j.id ? null : j)}
                                                                     className={`w-full flex items-center gap-2 p-2.5 rounded-lg border transition mb-1 text-left
                                                                         ${playerIn?.id === j.id ? 'bg-green-900/50 border-green-500 ring-1 ring-green-400' : 'bg-gray-800 border-gray-700 hover:bg-green-900/20 hover:border-green-900'}`}>
-                                                                {j.foto
-                                                                    ? <img src={j.foto} alt={j.nombre} className="w-8 h-8 rounded-full object-cover flex-shrink-0 bg-gray-700" onError={e => { e.target.style.display = 'none' }} />
-                                                                    : <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${colors.bg} ${colors.text}`}>{j.nombre?.charAt(0)}</div>
-                                                                }
+                                                                                                    {j.foto
+                                                                                                        ? <BiwengerAvatar player={j} alt={j.nombre} className="w-8 h-8 rounded-full object-cover flex-shrink-0 bg-gray-700" />
+                                                                                                        : <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${colors.bg} ${colors.text}`}>{j.nombre?.charAt(0)}</div>
+                                                                                                    }
                                                                 <span className="text-white text-sm flex-1 truncate font-medium">{j.nombre}</span>
                                                                 <span className="text-green-400 text-xs flex-shrink-0">{j.precio ? (j.precio/1_000_000).toFixed(1)+'M' : ''}</span>
                                                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${colors.bg} ${colors.text}`}>{j.posicion?.slice(0,3).toUpperCase()}</span>
@@ -364,7 +350,7 @@ export default function Canvis() {
                         </div>
                         <div className="space-y-2.5 mb-5">
                             <div className="flex items-center gap-3 bg-red-950/60 border border-red-800 rounded-xl p-3">
-                                {playerOut.foto && <img src={playerOut.foto} alt="" className="w-9 h-9 rounded-full object-cover bg-gray-700" onError={e => { e.target.style.display = 'none' }} />}
+                                {playerOut.foto && <BiwengerAvatar player={playerOut} alt="" className="w-9 h-9 rounded-full object-cover bg-gray-700" />}
                                 <div>
                                     <p className="text-red-400 text-[10px] font-bold uppercase">Surt ↑</p>
                                     <p className="text-white font-semibold text-sm">{playerOut.nombre}</p>
@@ -372,7 +358,7 @@ export default function Canvis() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3 bg-green-950/60 border border-green-800 rounded-xl p-3">
-                                {playerIn.foto && <img src={playerIn.foto} alt="" className="w-9 h-9 rounded-full object-cover bg-gray-700" onError={e => { e.target.style.display = 'none' }} />}
+                                {playerIn.foto && <BiwengerAvatar player={playerIn} alt="" className="w-9 h-9 rounded-full object-cover bg-gray-700" />}
                                 <div>
                                     <p className="text-green-400 text-[10px] font-bold uppercase">Entra ↓</p>
                                     <p className="text-white font-semibold text-sm">{playerIn.nombre}</p>

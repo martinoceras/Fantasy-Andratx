@@ -1,7 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '../../lib/supabase'
+import Image from 'next/image'
+import { supabase } from '@/lib/supabase'
 import Navbar from '../components/Navbar'
 import BiwengerAvatar from '../components/BiwengerAvatar'
 
@@ -64,7 +65,7 @@ export default function Draft() {
         return 'text-green-400'
     }
 
-    async function guardarPerfil(u) {
+    const guardarPerfil = useCallback(async (u) => {
         const { data } = await supabase.from('profiles').select('id').eq('id', u.id).single()
         if (!data) {
             await supabase.from('profiles').insert({
@@ -72,19 +73,17 @@ export default function Draft() {
                 nom: u.user_metadata?.full_name || u.email.split('@')[0]
             })
         }
-    }
+    }, [])
 
-    async function fetchTot(userId) {
-        await Promise.all([fetchPlayers(), fetchPicks(userId), fetchDraft(), fetchParticipants(), fetchPuntsJornades()])
-        setLoading(false)
-    }
-
-    async function fetchPlayers() {
+    const fetchPlayers = useCallback(async () => {
         const { data } = await supabase.from('players').select('*').order('posicion').order('nombre')
-        setPlayers(data || [])
-    }
+        setPlayers((data || []).map(p => ({
+            ...p,
+            equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
+        })))
+    }, [])
 
-    async function fetchPuntsJornades() {
+    const fetchPuntsJornades = useCallback(async () => {
         const { data } = await supabase
             .from('player_punts')
             .select('player_id, jornada, punts')
@@ -94,12 +93,11 @@ export default function Draft() {
             if (!mapa[p.player_id]) mapa[p.player_id] = []
             if (mapa[p.player_id].length < 5) mapa[p.player_id].push({ jornada: p.jornada, punts: p.punts })
         })
-        // Mostrar de més antiga a més recent
         Object.keys(mapa).forEach(k => { mapa[k] = mapa[k].reverse() })
         setPuntsByPlayer(mapa)
-    }
+    }, [])
 
-    async function fetchPicks(userId) {
+    const fetchPicks = useCallback(async (userId) => {
         const { data } = await supabase
             .from('draft_picks')
             .select('player_id, user_id, torn, temps_seleccio')
@@ -107,26 +105,22 @@ export default function Draft() {
         setPicksDetall(data || [])
         setPicks(data?.map(p => p.player_id) || [])
         if (userId) setMeusPicks(data?.filter(p => p.user_id === userId).map(p => p.player_id) || [])
-    }
+    }, [])
 
-    async function fetchDraft() {
+    const fetchDraft = useCallback(async () => {
         const { data } = await supabase.from('drafts').select('*').single()
         setDraft(data)
-    }
+    }, [])
 
-    async function fetchParticipants() {
+    const fetchParticipants = useCallback(async () => {
         const { data } = await supabase.from('profiles').select('id, nom, email')
         setParticipants(data || [])
-    }
+    }, [])
 
-    async function unirseAlDraft() {
-        if (!draft || !user) return
-        const ordre = draft.ordre_participants || []
-        if (ordre.includes(user.id)) return
-        const nouOrdre = [...ordre, user.id]
-        await supabase.from('drafts').update({ ordre_participants: nouOrdre }).eq('id', draft.id)
-        fetchDraft()
-    }
+    const fetchTot = useCallback(async (userId) => {
+        await Promise.all([fetchPlayers(), fetchPicks(userId), fetchDraft(), fetchParticipants(), fetchPuntsJornades()])
+        setLoading(false)
+    }, [fetchDraft, fetchParticipants, fetchPicks, fetchPlayers, fetchPuntsJornades])
 
     async function pickPlayer(playerId) {
         if (!user || !draft || !esMeuTorn) return
@@ -206,7 +200,7 @@ export default function Draft() {
             .subscribe()
 
         return () => { void supabase.removeChannel(canal) }
-    }, [])
+    }, [fetchDraft, fetchPicks, fetchTot, guardarPerfil, router])
 
     useEffect(() => {
         const id = setInterval(() => setAraTs(Date.now()), 1000)
@@ -222,7 +216,6 @@ export default function Draft() {
     const userActual = ordenatActual[posActual]
     const esMeuTorn = userActual === user?.id
     const nomActual = participants.find(p => p.id === userActual)?.nom || '...'
-    const jaEstic = ordre.includes(user?.id)
     const segonsTurn = segonsTornActual()
     const minutsTurn = Math.floor(segonsTurn / 60)
     const colorTemps = classeTemps(minutsTurn)
@@ -371,9 +364,15 @@ export default function Draft() {
                         <div className="font-bold text-sm text-white truncate">{player.nombre}</div>
                         <div className="flex items-center gap-1 text-gray-400 text-xs truncate">
                             {player.escudo_equip && (
-                                <img src={player.escudo_equip} alt=""
-                                     className="w-4 h-4 object-contain flex-shrink-0"
-                                     onError={e => { e.target.style.display = 'none' }} />
+                                <Image
+                                    src={player.escudo_equip}
+                                    alt=""
+                                    width={16}
+                                    height={16}
+                                    unoptimized
+                                    className="w-4 h-4 object-contain flex-shrink-0"
+                                    onError={e => { e.currentTarget.style.display = 'none' }}
+                                />
                             )}
                             {player.equipo_real}
                         </div>

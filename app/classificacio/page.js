@@ -205,7 +205,10 @@ export default function Classificacio() {
             ])
             if (!actiu) return
 
-            setAllPlayers(playersAll || [])
+            setAllPlayers((playersAll || []).map(p => ({
+                ...p,
+                equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
+            })))
             setTeamsData(teams || [])
 
             const mapa = {}

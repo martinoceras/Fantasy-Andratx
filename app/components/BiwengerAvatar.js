@@ -1,4 +1,5 @@
 'use client'
+import Image from 'next/image'
 import { useMemo, useState } from 'react'
 
 function unique(values) {
@@ -46,10 +47,12 @@ export default function BiwengerAvatar({
 
     if (src) {
         return (
-            <img
+            <Image
                 src={src}
                 alt={alt || player?.nombre || 'Jugador'}
                 className={className}
+                fill
+                unoptimized
                 onError={() => setIndex(prev => prev + 1)}
             />
         )

@@ -12,27 +12,31 @@ export default function Home() {
 
     useEffect(() => {
         async function init() {
-            const { data } = await supabase.auth.getUser()
-            if (!data.user) {
-                router.push('/login')
-                return
+            try {
+                const { data, error } = await supabase.auth.getUser()
+                if (error || !data.user) {
+                    router.replace('/login')
+                    return
+                }
+
+                setUser(data.user)
+
+                // Crea el perfil via API route (service key bypassa RLS)
+                const meta = data.user.user_metadata || {}
+                const nom = meta.full_name || meta.name || data.user.email?.split('@')[0] || 'Usuari'
+                await fetch('/api/auth/ensure-profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: data.user.id, email: data.user.email, nom }),
+                }).catch(() => null)
+                setLoading(false)
+            } catch {
+                router.replace('/login')
             }
-
-            setUser(data.user)
-
-            // Crea el perfil via API route (service key bypassa RLS)
-            const meta = data.user.user_metadata || {}
-            const nom = meta.full_name || meta.name || data.user.email?.split('@')[0] || 'Usuari'
-            await fetch('/api/auth/ensure-profile', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: data.user.id, email: data.user.email, nom }),
-            })
-            setLoading(false)
         }
 
         init()
-    }, [])
+    }, [router])
 
     if (loading) return (
         <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">

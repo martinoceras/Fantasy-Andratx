@@ -1,8 +1,10 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { supabase } from '../../lib/supabase'
 import Navbar from '../components/Navbar'
+import BiwengerAvatar from '../components/BiwengerAvatar'
 
 const POS_COLORS = {
     Porter:      { bg: 'bg-yellow-500', text: 'text-yellow-900' },
@@ -13,7 +15,6 @@ const POS_COLORS = {
 
 export default function CanviBomba() {
     const [user, setUser]                   = useState(null)
-    const [perfil, setPerfil]               = useState(null)
     const [loading, setLoading]             = useState(true)
     const [jornada, setJornada]             = useState(0)       // jornada actual detectada
     const [meusPicks, setMeusPicks]         = useState([])      // jugadors del meu equip (objectes)
@@ -40,7 +41,7 @@ export default function CanviBomba() {
             setUser(data.user)
             fetchTot(data.user.id)
         })
-    }, [])
+    }, [router])
 
     async function fetchTot(userId) {
         const [
@@ -59,7 +60,6 @@ export default function CanviBomba() {
             supabase.from('profiles').select('id, nom, email'),
         ])
 
-        setPerfil(perfilData)
         setProfiles(profilesData || [])
 
         // Jornada actual = màxima jornada amb punts registrats
@@ -69,8 +69,12 @@ export default function CanviBomba() {
         // Jugadors de l'usuari
         const myPickIds = new Set((picks || []).filter(p => p.user_id === userId).map(p => p.player_id))
         const allPickIds = new Set((picks || []).map(p => p.player_id))
-        const meus = (allPlayers || []).filter(p => myPickIds.has(p.id))
-        const disp = (allPlayers || []).filter(p => !allPickIds.has(p.id))
+        const normalitzats = (allPlayers || []).map(p => ({
+            ...p,
+            equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
+        }))
+        const meus = normalitzats.filter(p => myPickIds.has(p.id))
+        const disp = normalitzats.filter(p => !allPickIds.has(p.id))
         setMeusPicks(meus)
         setJugadorsDisponibles(disp)
 
@@ -81,7 +85,7 @@ export default function CanviBomba() {
 
         // Historial complet amb noms de jugadors i usuaris
         const allPlayersMap = {}
-        ;(allPlayers || []).forEach(p => { allPlayersMap[p.id] = p })
+        ;normalitzats.forEach(p => { allPlayersMap[p.id] = p })
         const hist = (bombesData || []).map(b => ({
             ...b,
             jugadorSurtObj:  allPlayersMap[b.jugador_surt],
@@ -274,12 +278,12 @@ export default function CanviBomba() {
                                                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${POS_COLORS[j.posicion]?.bg} ${POS_COLORS[j.posicion]?.text}`}>
                                                                     {j.nombre?.charAt(0)}
                                                                 </div>
-                                                                {j.foto && <img src={j.foto} alt="" className="w-8 h-8 rounded-full object-cover absolute inset-0" onError={e => { e.target.style.display='none' }} />}
+                                                                 {j.foto && <BiwengerAvatar player={j} alt="" className="w-8 h-8 rounded-full object-cover absolute inset-0" />}
                                                             </div>
                                                             <div className="flex-1 min-w-0">
                                                                 <p className="text-white text-xs font-medium truncate">{j.nombre}</p>
                                                                 <div className="flex items-center gap-1">
-                                                                    {j.escudo_equip && <img src={j.escudo_equip} alt="" className="w-3 h-3 object-contain" onError={e => { e.target.style.display='none' }} />}
+                                                                       {j.escudo_equip && <Image src={j.escudo_equip} alt="" width={12} height={12} unoptimized className="w-3 h-3 object-contain" onError={e => { e.currentTarget.style.display='none' }} />}
                                                                     <p className="text-gray-500 text-[10px] truncate">{j.equipo_real}</p>
                                                                 </div>
                                                             </div>
@@ -329,12 +333,12 @@ export default function CanviBomba() {
                                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${POS_COLORS[j.posicion]?.bg} ${POS_COLORS[j.posicion]?.text}`}>
                                                             {j.nombre?.charAt(0)}
                                                         </div>
-                                                        {j.foto && <img src={j.foto} alt="" className="w-8 h-8 rounded-full object-cover absolute inset-0" onError={e => { e.target.style.display='none' }} />}
+                                                         {j.foto && <BiwengerAvatar player={j} alt="" className="w-8 h-8 rounded-full object-cover absolute inset-0" />}
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <p className="text-white text-xs font-medium truncate">{j.nombre}</p>
                                                         <div className="flex items-center gap-1">
-                                                            {j.escudo_equip && <img src={j.escudo_equip} alt="" className="w-3 h-3 object-contain" onError={e => { e.target.style.display='none' }} />}
+                                                             {j.escudo_equip && <Image src={j.escudo_equip} alt="" width={12} height={12} unoptimized className="w-3 h-3 object-contain" onError={e => { e.currentTarget.style.display='none' }} />}
                                                             <p className="text-gray-500 text-[10px] truncate">{j.equipo_real}</p>
                                                         </div>
                                                     </div>
@@ -401,13 +405,13 @@ export default function CanviBomba() {
                                             </span>
                                             <div className="flex items-center gap-2 flex-1 flex-wrap">
                                                 <div className="flex items-center gap-1.5 bg-red-950/50 rounded-lg px-2 py-1">
-                                                    {surt?.foto && <img src={surt.foto} alt="" className="w-5 h-5 rounded-full object-cover" onError={e => { e.target.style.display='none' }} />}
+                                                                        {surt?.foto && <BiwengerAvatar player={surt} alt="" className="w-5 h-5 rounded-full object-cover" />}
                                                     <span className="text-red-300 text-xs font-medium">{surt?.nombre || `ID:${b.jugador_surt}`}</span>
                                                     {surt && badgePos(surt.posicion)}
                                                 </div>
                                                 <span className="text-gray-500 text-sm">→</span>
                                                 <div className="flex items-center gap-1.5 bg-green-950/50 rounded-lg px-2 py-1">
-                                                    {entra?.foto && <img src={entra.foto} alt="" className="w-5 h-5 rounded-full object-cover" onError={e => { e.target.style.display='none' }} />}
+                                                                        {entra?.foto && <BiwengerAvatar player={entra} alt="" className="w-5 h-5 rounded-full object-cover" />}
                                                     <span className="text-green-300 text-xs font-medium">{entra?.nombre || `ID:${b.jugador_entra}`}</span>
                                                     {entra && badgePos(entra.posicion)}
                                                 </div>

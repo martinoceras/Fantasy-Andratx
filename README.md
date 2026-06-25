@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Fantasy Andratx
 
-## Getting Started
+PWA (Progressive Web App) preparada per distribuir la lliga entre amics sense publicar a App Store o Play Store.
 
-First, run the development server:
+## Desenvolupament local
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Obre `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Build de produccio
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm run start
+```
 
-## Learn More
+## Instal lar com app
 
-To learn more about Next.js, take a look at the following resources:
+### Android (Chrome)
+1. Obre la URL de produccio.
+2. Menu > `Install app` o `Add to Home screen`.
+3. Accepta la instal lacio.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### iPhone (Safari)
+1. Obre la URL de produccio amb Safari.
+2. Botó compartir.
+3. `Afegir a pantalla d inici`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Fitxers PWA clau
 
-## Deploy on Vercel
+- `public/manifest.webmanifest`: metadades instal lables.
+- `public/sw.js`: service worker per cache basic i offline parcial.
+- `app/components/PWARegistrar.js`: registra el service worker al client.
+- `next.config.mjs`: headers per evitar cache agressiva de `sw.js` i manifest.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Com s actualitza per als usuaris
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Fas deploy d una nova versio.
+2. Quan l usuari torni a obrir l app, el navegador detecta canvis de `sw.js`.
+3. Si encara veu dades antigues, tancar i reobrir l app sol ser suficient.
+
+## Deploy recomanat
+
+Vercel funciona be per aquest flux. Si uses un altre hosting, mantingues HTTPS actiu i respecta els headers de cache.
