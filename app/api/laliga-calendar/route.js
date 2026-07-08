@@ -56,7 +56,7 @@ function formatDateLabel(value) {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return '-'
     return new Intl.DateTimeFormat('ca-ES', {
-        weekday: 'short',
+        weekday: 'long',
         day: '2-digit',
         month: '2-digit',
         hour: '2-digit',
@@ -76,6 +76,30 @@ function getMinuteFromMatch(match) {
     return null
 }
 
+function normalizeShieldUrl(raw) {
+    if (!raw || typeof raw !== 'string') return null
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw
+    if (raw.startsWith('/')) return `https://assets.laliga.com${raw}`
+    return null
+}
+
+function getTeamName(team, fallback) {
+    if (!team || typeof team !== 'object') return fallback
+    return team.nickname || team.shortname || team.name || fallback
+}
+
+function getTeamShield(team) {
+    if (!team || typeof team !== 'object') return null
+    return normalizeShieldUrl(
+        team?.shield?.url ||
+        team?.shield ||
+        team?.crest ||
+        team?.logo ||
+        team?.image ||
+        null
+    )
+}
+
 function normalizeMatch(match, index) {
     const home = getScoreFromMatch(match, 'home')
     const away = getScoreFromMatch(match, 'away')
@@ -87,8 +111,10 @@ function normalizeMatch(match, index) {
         id: match.id || match.slug || `${match.date || 'na'}-${index}`,
         date: match.date || null,
         dateLabel: formatDateLabel(match.date),
-        homeTeam: match.home_team?.nickname || match.home_team?.name || 'Local',
-        awayTeam: match.away_team?.nickname || match.away_team?.name || 'Visitant',
+        homeTeam: getTeamName(match.home_team, 'Local'),
+        awayTeam: getTeamName(match.away_team, 'Visitant'),
+        homeShield: getTeamShield(match.home_team),
+        awayShield: getTeamShield(match.away_team),
         resultat: resultIsOfficial(match, home, away) && home !== null && away !== null ? `${home} - ${away}` : null,
         status: match.status || null,
         isLive,
@@ -239,5 +265,7 @@ export async function GET(request) {
         return Response.json({ ok: false, error: error.message || 'Error intern carregant el calendari' }, { status: 500 })
     }
 }
+
+
 
 

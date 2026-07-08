@@ -595,7 +595,7 @@ export default function Equip() {
                         )}
 
                         {!calendariLoading && !calendariError && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                                 {(calendari.matches || []).map(match => {
                                     const statusColor = match.isLive
                                         ? 'border-red-500 bg-red-900/20'
@@ -616,7 +616,7 @@ export default function Equip() {
                                     return (
                                         <div
                                             key={match.id}
-                                            className={`border-2 rounded-xl p-4 transition-all hover:shadow-lg ${statusColor}`}
+                                            className={`border-2 rounded-xl p-3 transition-all hover:shadow-lg ${statusColor}`}
                                         >
                                             {/* Header amb estat */}
                                             <div className="flex items-center justify-between mb-3">
@@ -624,24 +624,45 @@ export default function Equip() {
                                                     {statusLabel}
                                                 </span>
                                                 {match.minute && (
-                                                    <span className="text-red-400 font-bold text-sm">{match.minute}'</span>
+                                                    <span className="text-red-400 font-bold text-sm">{match.minute}&apos;</span>
                                                 )}
                                             </div>
 
                                             {/* Data i hora */}
-                                            <p className="text-gray-400 text-[11px] mb-3 truncate">
+                                            <p className="text-gray-200 text-sm font-semibold mb-2">
                                                 {match.dateLabel}
                                             </p>
 
                                             {/* Partit */}
-                                            <div className="text-center mb-3">
-                                                <p className="text-gray-200 text-sm font-semibold leading-tight">
-                                                    <span className="text-purple-300">{match.homeTeam}</span>
-                                                </p>
-                                                <p className="text-gray-500 text-xs my-1">vs</p>
-                                                <p className="text-gray-200 text-sm font-semibold leading-tight">
-                                                    <span className="text-blue-300">{match.awayTeam}</span>
-                                                </p>
+                                            <div className="mb-2 max-w-[260px] mx-auto w-full space-y-1">
+                                                <div className="grid grid-cols-[24px_minmax(0,1fr)] items-start gap-2">
+                                                    {match.homeShield ? (
+                                                        <img
+                                                            src={match.homeShield}
+                                                            alt={`Escut ${match.homeTeam}`}
+                                                            className="w-6 h-6 object-contain"
+                                                            loading="lazy"
+                                                            onError={(e) => { e.currentTarget.style.display = 'none' }}
+                                                        />
+                                                    ) : (
+                                                        <div className="w-6 h-6 rounded-full bg-purple-800/60 text-[9px] text-purple-200 flex items-center justify-center font-bold">L</div>
+                                                    )}
+                                                    <p className="text-[13px] font-semibold text-purple-300 text-left whitespace-normal break-words leading-tight">{match.homeTeam}</p>
+                                                </div>
+                                                <div className="grid grid-cols-[24px_minmax(0,1fr)] items-start gap-2">
+                                                    {match.awayShield ? (
+                                                        <img
+                                                            src={match.awayShield}
+                                                            alt={`Escut ${match.awayTeam}`}
+                                                            className="w-6 h-6 object-contain"
+                                                            loading="lazy"
+                                                            onError={(e) => { e.currentTarget.style.display = 'none' }}
+                                                        />
+                                                    ) : (
+                                                        <div className="w-6 h-6 rounded-full bg-blue-800/60 text-[9px] text-blue-200 flex items-center justify-center font-bold">V</div>
+                                                    )}
+                                                    <p className="text-[13px] font-semibold text-blue-300 text-left whitespace-normal break-words leading-tight">{match.awayTeam}</p>
+                                                </div>
                                             </div>
 
                                             {/* Resultat */}
