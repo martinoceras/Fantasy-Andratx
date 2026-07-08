@@ -28,6 +28,38 @@ function nomCurt(nom) {
     return cognom.length > 9 ? cognom.slice(0, 9) : cognom
 }
 
+function teRegistrePunts(mapaPunts, playerId) {
+    return Object.prototype.hasOwnProperty.call(mapaPunts, playerId)
+}
+
+function aplicarSubstitucionsAutomatiques(alineacio = {}, suplents = {}, mapaPunts = {}) {
+    const resultat = { ...alineacio }
+    const canvis = []
+
+    Object.entries(alineacio || {}).forEach(([slotKey, titularId]) => {
+        if (!titularId || teRegistrePunts(mapaPunts, titularId)) return
+
+        const [posicio] = slotKey.split('_')
+        const suplent1 = suplents?.[`${posicio}_0`]
+        if (!suplent1) return
+
+        resultat[slotKey] = suplent1
+        canvis.push({ slotKey, titularOut: titularId, suplentIn: suplent1 })
+    })
+
+    return { alineacioFinal: resultat, canvis }
+}
+
+function potAplicarBanqueta({ jornada, estatJornada, tePuntsOficials }) {
+    if (!tePuntsOficials) return false
+    const activeWeek = Number(estatJornada?.activeWeek)
+    if (!Number.isInteger(activeWeek)) return false
+
+    if (jornada < activeWeek) return true
+    if (jornada === activeWeek) return estatJornada?.mode === 'season_finished'
+    return false
+}
+
 // ── Camp read-only (fora del component principal) ───────────────
 function CampEquip({ userId, teamsData, allPlayers, puntsByPlayer }) {
     const team = teamsData.find(t => t.user_id === userId)
@@ -140,7 +172,7 @@ export default function Classificacio() {
     const [tabActiva, setTabActiva]                       = useState('jornada')
 
     // Jornada actual
-    const [jornadaActual]                                 = useState(1)
+    const [jornadaActual, setJornadaActual]               = useState(1)
     const [rankingJornadaActual, setRankingJornadaActual] = useState([])
     const [carregantActual, setCarregantActual]           = useState(false)
     const [participantSel, setParticipantSel]             = useState(null)
@@ -160,6 +192,24 @@ export default function Classificacio() {
         { id: 'passades', label: '📋 Jornades passades' },
         { id: 'general',  label: '🏆 Classificació general' },
     ]
+
+    useEffect(() => {
+        let actiu = true
+        async function syncJornadaActual() {
+            const estat = await fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
+            if (!actiu || !estat?.ok) return
+
+            const activeWeek = Number(estat.activeWeek)
+            if (!Number.isInteger(activeWeek) || activeWeek <= 0) return
+
+            const jornadaRanking = estat.mode === 'countdown' && activeWeek > 1 ? activeWeek - 1 : activeWeek
+            setJornadaActual(jornadaRanking)
+            setJornadaSeleccionada((prev) => (prev === 1 ? jornadaRanking : prev))
+        }
+
+        void syncJornadaActual()
+        return () => { actiu = false }
+    }, [])
 
     // Carrega dades generals (per ranking general)
     useEffect(() => {
@@ -197,11 +247,20 @@ export default function Classificacio() {
         let actiu = true
         async function loadActual() {
             setCarregantActual(true)
-            const [{ data: punts }, { data: teams }, { data: perfils }, { data: playersAll }] = await Promise.all([
+            const [
+                { data: punts },
+                { data: teams },
+                { data: perfils },
+                { data: playersAll },
+                { data: snapshots },
+                estatJornadaRes,
+            ] = await Promise.all([
                 supabase.from('player_punts').select('player_id, punts').eq('jornada', jornadaActual),
-                supabase.from('teams').select('user_id, alineacio, formacio'),
+                supabase.from('teams').select('user_id, alineacio, suplents, formacio'),
                 supabase.from('profiles').select('id, nom, email'),
                 supabase.from('players').select('*'),
+                supabase.from('gameweek_lineups').select('user_id, jornada, alineacio, suplents, formacio').eq('jornada', jornadaActual),
+                fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({})),
             ])
             if (!actiu) return
 
@@ -209,14 +268,34 @@ export default function Classificacio() {
                 ...p,
                 equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
             })))
-            setTeamsData(teams || [])
-
             const mapa = {}
             punts?.forEach(p => { mapa[p.player_id] = Number(p.punts) })
             setPuntsByPlayer(mapa)
 
+            const substitutionsActives = potAplicarBanqueta({
+                jornada: jornadaActual,
+                estatJornada: estatJornadaRes,
+                tePuntsOficials: (punts || []).length > 0,
+            })
+
+            const snapshotByUser = new Map((snapshots || []).map(s => [s.user_id, s]))
+            const teamsAplicats = (teams || []).map((team) => {
+                const snap = snapshotByUser.get(team.user_id)
+                const alineacioBase = snap?.alineacio || team.alineacio || {}
+                const suplentsBase = snap?.suplents || team.suplents || {}
+                const { alineacioFinal } = substitutionsActives
+                    ? aplicarSubstitucionsAutomatiques(alineacioBase, suplentsBase, mapa)
+                    : { alineacioFinal: alineacioBase }
+                return {
+                    ...team,
+                    alineacio: alineacioFinal,
+                    formacio: snap?.formacio || team.formacio,
+                }
+            })
+            setTeamsData(teamsAplicats)
+
             const calc = (perfils || []).map(perfil => {
-                const team = teams?.find(t => t.user_id === perfil.id)
+                const team = teamsAplicats.find(t => t.user_id === perfil.id)
                 const alineacio = team?.alineacio || {}
                 const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (mapa[pid] || 0), 0)
                 return { userId: perfil.id, nom: perfil.nom || perfil.email || '...', punts: totalPunts }
@@ -237,16 +316,42 @@ export default function Classificacio() {
         async function loadJornada() {
             setCarregantJornada(true)
             setRankingJornada([])
-            const [{ data: punts }, { data: teams }, { data: perfils }] = await Promise.all([
+            const [
+                { data: punts },
+                { data: teams },
+                { data: perfils },
+                { data: snapshots },
+                estatJornadaRes,
+            ] = await Promise.all([
                 supabase.from('player_punts').select('player_id, punts').eq('jornada', jornadaSeleccionada),
-                supabase.from('teams').select('user_id, alineacio'),
+                supabase.from('teams').select('user_id, alineacio, suplents'),
                 supabase.from('profiles').select('id, nom, email'),
+                supabase.from('gameweek_lineups').select('user_id, jornada, alineacio, suplents').eq('jornada', jornadaSeleccionada),
+                fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({})),
             ])
             if (!actiu) return
             const puntsMapa = {}
             punts?.forEach(p => { puntsMapa[p.player_id] = Number(p.punts) })
+
+            const substitutionsActives = potAplicarBanqueta({
+                jornada: jornadaSeleccionada,
+                estatJornada: estatJornadaRes,
+                tePuntsOficials: (punts || []).length > 0,
+            })
+
+            const snapshotByUser = new Map((snapshots || []).map(s => [s.user_id, s]))
+            const teamsAplicats = (teams || []).map((team) => {
+                const snap = snapshotByUser.get(team.user_id)
+                const alineacioBase = snap?.alineacio || team.alineacio || {}
+                const suplentsBase = snap?.suplents || team.suplents || {}
+                const { alineacioFinal } = substitutionsActives
+                    ? aplicarSubstitucionsAutomatiques(alineacioBase, suplentsBase, puntsMapa)
+                    : { alineacioFinal: alineacioBase }
+                return { ...team, alineacio: alineacioFinal }
+            })
+
             const rankingCalculat = (perfils || []).map(perfil => {
-                const team = teams?.find(t => t.user_id === perfil.id)
+                const team = teamsAplicats.find(t => t.user_id === perfil.id)
                 const alineacio = team?.alineacio || {}
                 const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
                 return { userId: perfil.id, nom: perfil.nom || perfil.email || '...', punts: totalPunts }

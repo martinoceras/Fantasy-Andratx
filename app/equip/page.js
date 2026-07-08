@@ -64,7 +64,33 @@ export default function Equip() {
     const [calendari, setCalendari] = useState({ jornades: [], matches: [], jornadaSeleccionada: null, updatedAt: null })
     const [calendariLoading, setCalendariLoading] = useState(true)
     const [calendariError, setCalendariError] = useState('')
+    const [jornadaStatus, setJornadaStatus] = useState({
+        loading: true,
+        mode: 'unknown',
+        lockEditing: false,
+        activeWeek: null,
+        targetDate: null,
+        message: '',
+    })
+    const [countdown, setCountdown] = useState(null)
+    const [bloqueigPersistitJornada, setBloqueigPersistitJornada] = useState(null)
     const router = useRouter()
+    const edicioBloquejada = jornadaStatus.lockEditing === true
+
+    function obtenirCompteEnrere(targetDateIso) {
+        if (!targetDateIso) return null
+        const targetTs = new Date(targetDateIso).getTime()
+        if (Number.isNaN(targetTs)) return null
+
+        const diff = Math.max(0, targetTs - Date.now())
+        const totalSeconds = Math.floor(diff / 1000)
+        const dies = Math.floor(totalSeconds / 86400)
+        const hores = Math.floor((totalSeconds % 86400) / 3600)
+        const minuts = Math.floor((totalSeconds % 3600) / 60)
+        const segons = totalSeconds % 60
+
+        return { dies, hores, minuts, segons, acabat: totalSeconds <= 0 }
+    }
 
     async function carregarCalendari(jornada) {
         setCalendariLoading(true)
@@ -154,12 +180,96 @@ export default function Equip() {
     useEffect(() => {
         const timerId = setTimeout(() => {
             carregarCalendari()
+            carregarEstatJornada()
         }, 0)
         return () => clearTimeout(timerId)
     }, [])
 
-    async function desarAuto(nousTitulars, novaFormacio, nousSuplents) {
+    useEffect(() => {
+        const refreshId = setInterval(() => {
+            carregarEstatJornada()
+        }, 30000)
+
+        return () => clearInterval(refreshId)
+    }, [])
+
+    useEffect(() => {
+        if (jornadaStatus.mode !== 'countdown' || !jornadaStatus.targetDate) {
+            setCountdown(null)
+            return
+        }
+
+        const updateCountdown = () => {
+            const nou = obtenirCompteEnrere(jornadaStatus.targetDate)
+            setCountdown(nou)
+            if (nou?.acabat) carregarEstatJornada()
+        }
+
+        updateCountdown()
+        const countdownId = setInterval(updateCountdown, 1000)
+        return () => clearInterval(countdownId)
+    }, [jornadaStatus.mode, jornadaStatus.targetDate])
+
+    async function carregarEstatJornada() {
+        try {
+            const res = await fetch('/api/gameweek-status', { cache: 'no-store' })
+            const json = await res.json()
+            if (!res.ok || !json?.ok) {
+                setJornadaStatus(prev => ({
+                    ...prev,
+                    loading: false,
+                    mode: 'unknown',
+                    lockEditing: false,
+                    message: json?.error || 'No s\'ha pogut calcular l\'estat de jornada',
+                }))
+                return
+            }
+
+            setJornadaStatus({
+                loading: false,
+                mode: json.mode || 'unknown',
+                lockEditing: json.lockEditing === true,
+                activeWeek: json.activeWeek || null,
+                targetDate: json.targetDate || null,
+                message: json.message || '',
+            })
+        } catch (err) {
+            setJornadaStatus(prev => ({
+                ...prev,
+                loading: false,
+                mode: 'unknown',
+                lockEditing: false,
+                message: err.message || 'Error calculant l\'estat de jornada',
+            }))
+        }
+    }
+
+    async function guardarSnapshotJornada(jornada) {
+        if (!user || !jornada) return
+        try {
+            const { data: sessionData } = await supabase.auth.getSession()
+            const token = sessionData?.session?.access_token
+            const headers = { 'Content-Type': 'application/json' }
+            if (token) headers.Authorization = `Bearer ${token}`
+
+            await fetch('/api/gameweek-lock', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    jornada,
+                    alineacio: titulars,
+                    suplents: suplents,
+                    formacio,
+                }),
+            })
+        } catch {
+            // Si falla el snapshot, mantenim app funcional i ho reintentarem al següent refresc
+        }
+    }
+
+    async function desarAuto(nousTitulars, novaFormacio, nousSuplents, forcarGuardat = false) {
         if (!user) return
+        if (edicioBloquejada && !forcarGuardat) return
         setDesant(true)
         const payload = {
             user_id: user.id,
@@ -177,7 +287,29 @@ export default function Equip() {
         setTimeout(() => setDesant(false), 800)
     }
 
+    useEffect(() => {
+        if (!user || !edicioBloquejada || !jornadaStatus.activeWeek) return
+        if (bloqueigPersistitJornada === jornadaStatus.activeWeek) return
+
+        setSeleccionat(null)
+        desarAuto(titulars, formacio, suplents, true)
+        guardarSnapshotJornada(jornadaStatus.activeWeek)
+        setBloqueigPersistitJornada(jornadaStatus.activeWeek)
+    }, [
+        user,
+        edicioBloquejada,
+        jornadaStatus.activeWeek,
+        bloqueigPersistitJornada,
+        titulars,
+        formacio,
+        suplents,
+    ])
+
     function canviarFormacio(novaFormacio) {
+        if (edicioBloquejada) {
+            alert('JORNADA EN JOC: la teva alineació està bloquejada fins que acabi la jornada.')
+            return
+        }
         const nova = FORMACIONS[novaFormacio]
         const actual = FORMACIONS[formacio]
 
@@ -219,6 +351,10 @@ export default function Equip() {
     }
 
     function handleClickSlot(posicio, index) {
+        if (edicioBloquejada) {
+            alert('JORNADA EN JOC: no pots editar titulars ni suplents ara mateix.')
+            return
+        }
         const key = `${posicio}_${index}`
         const jugadorActualId = titulars[key]
         const jugadorActual = jugadors.find(j => j.id === jugadorActualId)
@@ -279,6 +415,10 @@ export default function Equip() {
     }
 
     function handleClickBanqueta(posicio, index) {
+        if (edicioBloquejada) {
+            alert('JORNADA EN JOC: no pots editar titulars ni suplents ara mateix.')
+            return
+        }
         const key = `${posicio}_${index}`
         const jugadorId = suplents[key]
         const jugador = jugadors.find(j => j.id === jugadorId)
@@ -362,7 +502,7 @@ export default function Equip() {
                 <div
                     onClick={() => handleClickSlot(posicio, index)}
                     className={`
-            border-2 flex items-center justify-center cursor-pointer
+            border-2 flex items-center justify-center ${edicioBloquejada ? 'cursor-not-allowed' : 'cursor-pointer'}
             transition-all duration-150 select-none
             ${jugador
                         ? `${colors.light} ${colors.border}`
@@ -370,7 +510,7 @@ export default function Equip() {
                             ? 'border-dashed border-white bg-white/15 animate-pulse'
                             : 'border-dashed border-white/20 bg-black/20'
                     }
-            ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : mostraCanviPossible ? `ring-2 ${POS_RING_COMPAT[posicio]} shadow-md` : 'hover:scale-105'}
+            ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : mostraCanviPossible ? `ring-2 ${POS_RING_COMPAT[posicio]} shadow-md` : edicioBloquejada ? '' : 'hover:scale-105'}
           `}
                     style={{ width: slotSize, height: slotSize }}
                  >
@@ -421,11 +561,32 @@ export default function Equip() {
                     </Link>
                 </div>
 
+                <div className={`rounded-xl border p-3 mb-4 ${edicioBloquejada ? 'bg-red-950/60 border-red-600' : 'bg-gray-900 border-gray-700'}`}>
+                    {jornadaStatus.loading ? (
+                        <p className="text-gray-300 text-sm">Calculant estat de jornada...</p>
+                    ) : edicioBloquejada ? (
+                        <div>
+                            <p className="text-red-300 text-base font-bold">JORNADA EN JOC</p>
+                            <p className="text-red-200 text-xs mt-1">Titulars i banqueta bloquejats. Aquesta alineació serà la que puntuarà.</p>
+                        </div>
+                    ) : jornadaStatus.mode === 'countdown' && countdown ? (
+                        <div>
+                            <p className="text-purple-300 text-sm font-semibold">Compte enrere Jornada {jornadaStatus.activeWeek}</p>
+                            <p className="text-white text-xl font-bold mt-1">
+                                {countdown.dies}d {String(countdown.hores).padStart(2, '0')}h {String(countdown.minuts).padStart(2, '0')}m {String(countdown.segons).padStart(2, '0')}s
+                            </p>
+                        </div>
+                    ) : (
+                        <p className="text-gray-300 text-sm">{jornadaStatus.message || 'Esperant propera actualització de jornada'}</p>
+                    )}
+                </div>
+
                 {/* Selector formació */}
                 <div className="flex gap-1.5 flex-wrap mb-4">
                     {Object.keys(FORMACIONS).map(f => (
                         <button key={f} onClick={() => canviarFormacio(f)}
-                                className={`px-3 py-1 rounded-lg text-sm font-mono font-bold transition ${formacio === f ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                                disabled={edicioBloquejada}
+                                className={`px-3 py-1 rounded-lg text-sm font-mono font-bold transition ${formacio === f ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'} ${edicioBloquejada ? 'opacity-50 cursor-not-allowed hover:bg-gray-800' : ''}`}>
                             {f}
                         </button>
                     ))}
@@ -530,7 +691,7 @@ export default function Equip() {
                                                     <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 82 }}>
                                                         <div
                                                             onClick={() => handleClickBanqueta(posicio, index)}
-                                                            className={`w-16 h-16 border-2 flex items-center justify-center transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
+                                                            className={`w-16 h-16 border-2 flex items-center justify-center transition-all ${edicioBloquejada ? 'cursor-not-allowed' : jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador && !edicioBloquejada ? 'hover:scale-105' : ''}`}
                                                         >
                                                             {jugador
                                                                 ? <BiwengerAvatar

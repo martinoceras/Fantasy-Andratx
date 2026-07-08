@@ -3,6 +3,8 @@ export const revalidate = 0
 
 const RESULTS_URL = 'https://www.laliga.com/laliga-easports/resultados'
 const COMPETITION = 'laliga-easports'
+const THESPORTSDB_EVENTSROUND_URL = 'https://www.thesportsdb.com/api/v1/json/123/eventsround.php'
+const THESPORTSDB_LEAGUE_ID = '4335'
 
 function parseJsonSafe(text) {
     try {
@@ -124,6 +126,36 @@ function normalizeMatch(match, index) {
     }
 }
 
+function normalizeSportsDbMatch(event, index) {
+    const homeScore = toNumber(event?.intHomeScore)
+    const awayScore = toNumber(event?.intAwayScore)
+    const statusRaw = String(event?.strStatus || '').toUpperCase()
+    const isLive = ['1H', '2H', 'HT', 'ET', 'PEN', 'LIVE'].includes(statusRaw)
+    const isFinished = ['FT', 'AET', 'PEN'].includes(statusRaw)
+    const hasRealResult = homeScore !== null && awayScore !== null && (isFinished || isLive)
+    const dateIso = event?.strTimestamp
+        ? `${event.strTimestamp}Z`
+        : event?.dateEvent && event?.strTime
+            ? `${event.dateEvent}T${event.strTime}Z`
+            : null
+
+    return {
+        id: event?.idEvent || `sportsdb-${index}`,
+        date: dateIso,
+        dateLabel: formatDateLabel(dateIso),
+        homeTeam: event?.strHomeTeam || 'Local',
+        awayTeam: event?.strAwayTeam || 'Visitant',
+        homeShield: normalizeShieldUrl(event?.strHomeTeamBadge),
+        awayShield: normalizeShieldUrl(event?.strAwayTeamBadge),
+        resultat: hasRealResult ? `${homeScore} - ${awayScore}` : null,
+        status: event?.strStatus || null,
+        isLive,
+        minute: null,
+        homeScore,
+        awayScore,
+    }
+}
+
 function findMatchesArray(payload) {
     if (!payload || typeof payload !== 'object') return null
 
@@ -206,6 +238,35 @@ async function fetchFromBackend({ backendUrl, subscriptionKey, week, seasonList 
     return null
 }
 
+async function fetchFromSportsDb({ week, seasonList }) {
+    for (const season of seasonList) {
+        try {
+            const params = new URLSearchParams({
+                id: THESPORTSDB_LEAGUE_ID,
+                r: String(week),
+                s: String(season),
+            })
+
+            const res = await fetch(`${THESPORTSDB_EVENTSROUND_URL}?${params.toString()}`, {
+                cache: 'no-store',
+                headers: { Accept: 'application/json' },
+            })
+            if (!res.ok) continue
+            const payload = await res.json().catch(() => null)
+            const events = payload?.events
+            if (Array.isArray(events) && events.length > 0) {
+                return events
+                    .map((event, index) => normalizeSportsDbMatch(event, index))
+                    .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime())
+            }
+        } catch {
+            // Seguim provant altres temporades candidates
+        }
+    }
+
+    return null
+}
+
 export async function GET(request) {
     const reqUrl = new URL(request.url)
     const weekParam = toNumber(reqUrl.searchParams.get('week'))
@@ -239,18 +300,29 @@ export async function GET(request) {
             rawMatches = pageProps.matches || []
         }
 
+        const seasonList = seasonCandidates(pageProps.season, pageProps.gameweekList || [])
+
         if (!rawMatches || rawMatches.length === 0) {
             rawMatches = await fetchFromBackend({
                 backendUrl: nextData?.runtimeConfig?.backendUrl,
                 subscriptionKey: nextData?.runtimeConfig?.backendSubscription,
                 week: selectedWeek,
-                seasonList: seasonCandidates(pageProps.season, pageProps.gameweekList || []),
+                seasonList,
             })
         }
 
-        const matches = (rawMatches || [])
-            .map((match, index) => normalizeMatch(match, index))
-            .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime())
+        let matches
+        if (!rawMatches || rawMatches.length === 0) {
+            matches = await fetchFromSportsDb({ week: selectedWeek, seasonList })
+        } else {
+            matches = rawMatches
+                .map((match, index) => normalizeMatch(match, index))
+                .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime())
+        }
+
+        if (!matches) {
+            matches = []
+        }
 
         return Response.json({
             ok: true,
@@ -265,6 +337,9 @@ export async function GET(request) {
         return Response.json({ ok: false, error: error.message || 'Error intern carregant el calendari' }, { status: 500 })
     }
 }
+
+
+
 
 
 

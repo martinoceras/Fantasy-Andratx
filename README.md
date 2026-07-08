@@ -46,3 +46,10 @@ npm run start
 ## Deploy recomanat
 
 Vercel funciona be per aquest flux. Si uses un altre hosting, mantingues HTTPS actiu i respecta els headers de cache.
+
+## Anti-trampes de jornada
+
+- Script DB: `supabase/anti-trampes.sql`
+- Script DB (bloqueig punts): `supabase/anti-trampes-punts-lock.sql`
+- Documentació funcional: `docs/anti-trampes.md`
+- Endpoint super admin punts: `POST /api/admin/gameweek-points` (requereix `ADMIN_SECRET`)
