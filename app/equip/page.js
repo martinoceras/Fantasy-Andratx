@@ -61,7 +61,35 @@ export default function Equip() {
     const [loading, setLoading]         = useState(true)
     const [desant, setDesant]           = useState(false)
     const [maxJugadors, setMaxJugadors] = useState(15)
+    const [calendari, setCalendari] = useState({ jornades: [], matches: [], jornadaSeleccionada: null, updatedAt: null })
+    const [calendariLoading, setCalendariLoading] = useState(true)
+    const [calendariError, setCalendariError] = useState('')
     const router = useRouter()
+
+    async function carregarCalendari(jornada) {
+        setCalendariLoading(true)
+        setCalendariError('')
+        try {
+            const params = new URLSearchParams()
+            if (jornada) params.set('week', String(jornada))
+            const res = await fetch(`/api/laliga-calendar${params.toString() ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
+            const json = await res.json()
+            if (!res.ok || !json?.ok) {
+                setCalendariError(json?.error || 'No s\'ha pogut carregar el calendari')
+                return
+            }
+            setCalendari({
+                jornades: json.jornades || [],
+                matches: json.matches || [],
+                jornadaSeleccionada: json.selectedWeek || jornada || null,
+                updatedAt: json.updatedAt || null,
+            })
+        } catch (err) {
+            setCalendariError(err.message || 'Error desconegut carregant el calendari')
+        } finally {
+            setCalendariLoading(false)
+        }
+    }
 
     async function fetchTot(userId) {
         const { data: perfilData } = await supabase.from('profiles').select('*').eq('id', userId).single()
@@ -122,6 +150,13 @@ export default function Equip() {
             else { setUser(data.user); fetchTot(data.user.id) }
         })
     }, [router])
+
+    useEffect(() => {
+        const timerId = setTimeout(() => {
+            carregarCalendari()
+        }, 0)
+        return () => clearTimeout(timerId)
+    }, [])
 
     async function desarAuto(nousTitulars, novaFormacio, nousSuplents) {
         if (!user) return
@@ -399,25 +434,26 @@ export default function Equip() {
                 {/* Layout horitzontal */}
                 <div className="flex gap-4 items-start">
 
-                    {/* Camp de futbol */}
-                    <div className="relative rounded-xl overflow-hidden flex-shrink-0"
-                         style={{
-                             width: 380,
-                             height: 560,
-                             backgroundImage: `
-                repeating-linear-gradient(180deg,
-                  rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 40px,
-                  transparent 40px, transparent 80px
-                ),
-                linear-gradient(180deg,
-                  #1e5c1e 0%, #246b24 14%, #1e5c1e 28%,
-                  #246b24 42%, #1e5c1e 56%,
-                  #246b24 70%, #1e5c1e 84%, #246b24 100%
-                )
-              `,
-                             border: '3px solid #14401a',
-                             boxShadow: 'inset 0 0 40px rgba(0,0,0,0.4), 0 4px 20px rgba(0,0,0,0.5)'
-                         }}>
+                    <div className="w-[380px] max-w-full flex-shrink-0 flex flex-col gap-3">
+                        {/* Camp de futbol */}
+                        <div className="relative rounded-xl overflow-hidden"
+                             style={{
+                                 width: 380,
+                                 height: 560,
+                                 backgroundImage: `
+                 repeating-linear-gradient(180deg,
+                   rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 40px,
+                   transparent 40px, transparent 80px
+                 ),
+                 linear-gradient(180deg,
+                   #1e5c1e 0%, #246b24 14%, #1e5c1e 28%,
+                   #246b24 42%, #1e5c1e 56%,
+                   #246b24 70%, #1e5c1e 84%, #246b24 100%
+                 )
+               `,
+                                 border: '3px solid #14401a',
+                                 boxShadow: 'inset 0 0 40px rgba(0,0,0,0.4), 0 4px 20px rgba(0,0,0,0.5)'
+                             }}>
 
                         <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 320 480" preserveAspectRatio="none">
                             <rect x="8" y="8" width="304" height="464" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1.5"/>
@@ -447,6 +483,7 @@ export default function Equip() {
                             <div className="flex justify-around items-center">
                                 {Array.from({ length: formacioActual.Porter }).map((_, i) => renderSlot('Porter', i))}
                             </div>
+                        </div>
                         </div>
                     </div>
 
@@ -522,6 +559,118 @@ export default function Equip() {
                 <p className="text-gray-700 text-xs text-center mt-3">
                     Clica un jugador → clica on el vols posar · Els canvis es desen automàticament
                 </p>
+
+                {/* CALENDARI LALIGA EA SPORTS — FULL WIDTH */}
+                <div className="mt-8 w-full">
+                    <div className="bg-gradient-to-b from-gray-800 to-gray-900 border-2 border-purple-500/40 rounded-2xl p-6 shadow-xl">
+                        <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+                            <div>
+                                <h2 className="text-2xl font-bold text-purple-300">⚽ Calendari LALIGA EA SPORTS</h2>
+                                <p className="text-gray-400 text-xs mt-1">Vull els resultats oficials quan es publiquin</p>
+                            </div>
+                            <select
+                                value={calendari.jornadaSeleccionada || ''}
+                                onChange={(e) => carregarCalendari(Number(e.target.value))}
+                                disabled={calendariLoading}
+                                className="bg-gray-900 border-2 border-purple-400 rounded-lg text-sm font-semibold px-4 py-2 text-purple-100 hover:bg-gray-800 transition disabled:opacity-50"
+                            >
+                                {(calendari.jornades || []).map(j => (
+                                    <option key={j.week} value={j.week}>
+                                        Jornada {j.week}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {calendariLoading && (
+                            <div className="text-center py-12">
+                                <p className="text-gray-400 text-sm animate-pulse">Carregant partits...</p>
+                            </div>
+                        )}
+
+                        {!calendariLoading && calendariError && (
+                            <div className="bg-red-900/30 border border-red-500/50 rounded-lg p-4 text-red-200 text-sm">
+                                {calendariError}
+                            </div>
+                        )}
+
+                        {!calendariLoading && !calendariError && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                                {(calendari.matches || []).map(match => {
+                                    const statusColor = match.isLive
+                                        ? 'border-red-500 bg-red-900/20'
+                                        : new Date(match.date) < new Date()
+                                            ? 'border-green-500 bg-green-900/20'
+                                            : 'border-gray-600 bg-gray-800/40'
+                                    const statusLabel = match.isLive
+                                        ? `EN DIRECTE ${match.minute ? `(${match.minute}')` : ''}`
+                                        : new Date(match.date) < new Date()
+                                            ? 'FINALITZAT'
+                                            : 'PRÒXIM'
+                                    const statusBg = match.isLive
+                                        ? 'bg-red-500'
+                                        : new Date(match.date) < new Date()
+                                            ? 'bg-green-500'
+                                            : 'bg-gray-600'
+
+                                    return (
+                                        <div
+                                            key={match.id}
+                                            className={`border-2 rounded-xl p-4 transition-all hover:shadow-lg ${statusColor}`}
+                                        >
+                                            {/* Header amb estat */}
+                                            <div className="flex items-center justify-between mb-3">
+                                                <span className={`${statusBg} text-white text-[10px] font-bold px-2.5 py-1 rounded-full`}>
+                                                    {statusLabel}
+                                                </span>
+                                                {match.minute && (
+                                                    <span className="text-red-400 font-bold text-sm">{match.minute}'</span>
+                                                )}
+                                            </div>
+
+                                            {/* Data i hora */}
+                                            <p className="text-gray-400 text-[11px] mb-3 truncate">
+                                                {match.dateLabel}
+                                            </p>
+
+                                            {/* Partit */}
+                                            <div className="text-center mb-3">
+                                                <p className="text-gray-200 text-sm font-semibold leading-tight">
+                                                    <span className="text-purple-300">{match.homeTeam}</span>
+                                                </p>
+                                                <p className="text-gray-500 text-xs my-1">vs</p>
+                                                <p className="text-gray-200 text-sm font-semibold leading-tight">
+                                                    <span className="text-blue-300">{match.awayTeam}</span>
+                                                </p>
+                                            </div>
+
+                                            {/* Resultat */}
+                                            <div className="bg-black/40 rounded-lg p-3 text-center">
+                                                {match.isLive && match.homeScore !== null && match.awayScore !== null ? (
+                                                    <p className="text-2xl font-bold text-yellow-300">
+                                                        {match.homeScore} - {match.awayScore}
+                                                    </p>
+                                                ) : match.resultat ? (
+                                                    <p className="text-2xl font-bold text-green-300">
+                                                        {match.resultat}
+                                                    </p>
+                                                ) : (
+                                                    <p className="text-gray-400 text-sm">Per jugar</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+
+                        {!calendariLoading && !calendariError && (!calendari.matches || calendari.matches.length === 0) && (
+                            <div className="text-center py-12">
+                                <p className="text-gray-400 text-sm">No hi ha partits disponibles per aquesta jornada.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
             </main>
         </>
