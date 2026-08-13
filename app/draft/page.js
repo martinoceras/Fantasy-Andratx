@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import Navbar from '../components/Navbar'
 import BiwengerAvatar from '../components/BiwengerAvatar'
+import PlayerStatusBadge from '../components/PlayerStatusBadge'
 
 const POS_COLORS = {
     Porter:      { bg: 'bg-yellow-500', text: 'text-yellow-900' },
@@ -365,6 +366,8 @@ export default function Draft() {
                                         : 'bg-gray-900 border-gray-800 cursor-not-allowed opacity-70'
                     }`}
             >
+                <PlayerStatusBadge player={player} className="absolute right-2 top-2" />
+
                 {/* Foto + nom + equip */}
                 <div className="flex items-center gap-3 mb-2">
                     {/* Foto jugador: fallback inicial si la imatge no carrega */}

@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import Link from 'next/link'
 import Navbar from '../components/Navbar'
 import BiwengerAvatar from '../components/BiwengerAvatar'
+import PlayerStatusBadge from '../components/PlayerStatusBadge'
 
 const TEMPORADA = '2026-27'
 
@@ -502,7 +503,7 @@ export default function Equip() {
                 <div
                     onClick={() => handleClickSlot(posicio, index)}
                     className={`
-            border-2 flex items-center justify-center ${edicioBloquejada ? 'cursor-not-allowed' : 'cursor-pointer'}
+            border-2 flex items-center justify-center relative ${edicioBloquejada ? 'cursor-not-allowed' : 'cursor-pointer'}
             transition-all duration-150 select-none
             ${jugador
                         ? `${colors.light} ${colors.border}`
@@ -515,14 +516,17 @@ export default function Equip() {
                     style={{ width: slotSize, height: slotSize }}
                  >
                     {jugador ? (
-                        <BiwengerAvatar
-                            key={`tit_${jugador.id}_${jugador.foto || ''}`}
-                            player={jugador}
-                            alt={jugador.nombre}
-                            className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
-                            fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
-                            initialClassName={`${initialText} ${colors.text}`}
-                        />
+                        <>
+                            <BiwengerAvatar
+                                key={`tit_${jugador.id}_${jugador.foto || ''}`}
+                                player={jugador}
+                                alt={jugador.nombre}
+                                className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+                                fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
+                                initialClassName={`${initialText} ${colors.text}`}
+                            />
+                            <PlayerStatusBadge player={jugador} className="absolute -right-1 -top-1" />
+                        </>
                     ) : (
                         <span className="text-white/25 text-base">+</span>
                     )}
@@ -691,17 +695,20 @@ export default function Equip() {
                                                     <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 82 }}>
                                                         <div
                                                             onClick={() => handleClickBanqueta(posicio, index)}
-                                                            className={`w-16 h-16 border-2 flex items-center justify-center transition-all ${edicioBloquejada ? 'cursor-not-allowed' : jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador && !edicioBloquejada ? 'hover:scale-105' : ''}`}
+                                                            className={`w-16 h-16 border-2 flex items-center justify-center relative transition-all ${edicioBloquejada ? 'cursor-not-allowed' : jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador && !edicioBloquejada ? 'hover:scale-105' : ''}`}
                                                         >
                                                             {jugador
-                                                                ? <BiwengerAvatar
-                                                                    key={`banq_${jugador.id}_${jugador.foto || ''}`}
-                                                                    player={jugador}
-                                                                    alt={jugador.nombre}
-                                                                    className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
-                                                                    fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
-                                                                    initialClassName={`text-[10px] font-bold ${colors.text}`}
-                                                                />
+                                                                ? <>
+                                                                    <BiwengerAvatar
+                                                                        key={`banq_${jugador.id}_${jugador.foto || ''}`}
+                                                                        player={jugador}
+                                                                        alt={jugador.nombre}
+                                                                        className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+                                                                        fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
+                                                                        initialClassName={`text-[10px] font-bold ${colors.text}`}
+                                                                    />
+                                                                    <PlayerStatusBadge player={jugador} className="absolute -right-1 -top-1" />
+                                                                </>
                                                                 : <span className="text-white/25 text-base">{index + 1}</span>
                                                             }
                                                         </div>

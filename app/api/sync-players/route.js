@@ -19,6 +19,11 @@ function normalizeText(value, fallback = '') {
     return text || fallback
 }
 
+function optionalText(value) {
+    const text = typeof value === 'string' ? value.trim() : ''
+    return text || null
+}
+
 function calcValor(price) {
     if (!price) return 6
     if (price >= 70_000_000) return 10
@@ -71,6 +76,7 @@ async function doSync() {
                 precio:        p.price ?? p.fantasyPrice ?? 0,
                 punts_totals:  p.points ?? 0,
                 status:        typeof p.status === 'string' ? p.status : 'ok',
+                status_info:   optionalText(p.statusInfo),
                 // Foto principal via CDN actual.
                 foto:          `${FOTO_BASE}${p.id}.png`,
                 escudo_equip:  teamId ? `${ESCUDO_BASE}${teamId}.png` : null,
@@ -101,7 +107,18 @@ async function doSync() {
         .from('players')
         .upsert(jugadors, { onConflict: 'id' })
 
-    if (error) throw new Error(error.message)
+    if (error) {
+        // Backward compatibility: if status_info column does not exist yet, sync still works.
+        if (String(error.message || '').toLowerCase().includes('status_info')) {
+            const jugadorsFallback = jugadors.map(({ status_info, ...rest }) => rest)
+            const { error: fallbackError } = await supabaseAdmin
+                .from('players')
+                .upsert(jugadorsFallback, { onConflict: 'id' })
+            if (fallbackError) throw new Error(fallbackError.message)
+        } else {
+            throw new Error(error.message)
+        }
+    }
 
     // Sincronització estricta: la taula local ha de reflectir exactament Biwenger
     const { data: totsPlayers, error: errPlayers } = await supabaseAdmin.from('players').select('id')
