@@ -56,6 +56,18 @@ function getElapsedTurnSeconds(draft, nowTs = Date.now()) {
   return acumulat + Math.max(0, Math.floor((nowTs - iniciTs) / 1000))
 }
 
+function hasPauseColumnsSchemaError(error) {
+  const msg = String(error?.message || '').toLowerCase()
+  return msg.includes('schema cache') && (msg.includes('pausat_at') || msg.includes('temps_pausat_acumulat'))
+}
+
+function withoutPauseFields(payload) {
+  const cleaned = { ...payload }
+  delete cleaned.pausat_at
+  delete cleaned.temps_pausat_acumulat
+  return cleaned
+}
+
 export async function GET() {
   try {
     const draft = await getOrCreateDraft()
@@ -126,12 +138,24 @@ export async function POST(request) {
       return Response.json({ ok: false, error: 'Accio no suportada' }, { status: 400 })
     }
 
-    const { data: updated, error: updateError } = await supabaseAdmin
-      .from('drafts')
-      .update(updatePayload)
-      .eq('id', draft.id)
-      .select('*')
-      .single()
+    const runUpdate = async (payload) => {
+      return await supabaseAdmin
+        .from('drafts')
+        .update(payload)
+        .eq('id', draft.id)
+        .select('*')
+        .single()
+    }
+
+    let { data: updated, error: updateError } = await runUpdate(updatePayload)
+
+    if (updateError && hasPauseColumnsSchemaError(updateError)) {
+      // Compatibility mode for databases where pause columns are not migrated yet.
+      const fallbackPayload = withoutPauseFields(updatePayload)
+      const fallbackResult = await runUpdate(fallbackPayload)
+      updated = fallbackResult.data
+      updateError = fallbackResult.error
+    }
 
     if (updateError) {
       return Response.json({ ok: false, error: updateError.message }, { status: 500 })
@@ -142,6 +166,8 @@ export async function POST(request) {
     return Response.json({ ok: false, error: error.message || 'Error desant draft' }, { status: 500 })
   }
 }
+
+
 
 
 
