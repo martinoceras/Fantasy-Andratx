@@ -131,9 +131,8 @@ export default function Draft() {
     }, [fetchDraft, fetchParticipants, fetchPicks, fetchPlayers, fetchPuntsJornades])
 
     async function pickPlayer(playerId) {
-        if (!user || !draft || draft.estat !== 'actiu' || !esMeuTorn) return
+        if (!user || !draft || draft.estat !== 'actiu' || !esMeuTorn || confirmant) return
         const playerData = players.find(p => p.id === playerId)
-        const tornSegons = segonsTornActual()
 
         // Validació límit equip real
         if (playerData && maxEquip < 999) {
@@ -158,47 +157,35 @@ export default function Draft() {
             }
         }
         setConfirmant(true)
-        const ordre = draft.ordre_participants || []
-        const totalTorns = draft.max_jugadors * ordre.length
-        const nouTorn = draft.torn_actual + 1
-        const esDraftFinalitzat = nouTorn >= totalTorns
-
-        const ronda = Math.floor(draft.torn_actual / ordre.length)
-        const esParell = ronda % 2 === 0
-        const ordenat = esParell ? ordre : [...ordre].reverse()
-        const posActual = draft.torn_actual % ordre.length
-        const posSeguent = (posActual + 1) % ordre.length
-        const seguentUserId = ordenat[posSeguent]
-
-        await supabase.from('draft_picks').insert({
-            player_id: playerId,
-            user_id: user.id,
-            torn: draft.torn_actual,
-            temps_seleccio: tornSegons,
-        })
-        await supabase.from('drafts').update({
-            torn_actual: nouTorn,
-            torn_iniciat_at: esDraftFinalitzat ? null : new Date().toISOString(),
-            pausat_at: null,
-            temps_pausat_acumulat: 0,
-            ...(esDraftFinalitzat && { estat: 'finalitzat' }),
-        }).eq('id', draft.id)
-
-        if (!esDraftFinalitzat) {
-            const seguent = participants.find(p => p.id === seguentUserId)
-            if (seguent?.email) {
-                await fetch('/api/notify-torn', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: seguent.email, nom: seguent.nom || seguent.email,
-                        torn: nouTorn + 1, jugadorsTriats: picks.length + 1
-                    })
-                })
+        try {
+            const { data: sessionData } = await supabase.auth.getSession()
+            const token = sessionData?.session?.access_token
+            if (!token) {
+                alert('Sessio expirada. Torna a iniciar sessio.')
+                return
             }
+
+            const res = await fetch('/api/draft/make-pick', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ playerId }),
+            })
+
+            const payload = await res.json().catch(() => ({}))
+            if (!res.ok || !payload?.ok) {
+                alert(payload?.error || 'No s\'ha pogut confirmar el pick')
+                return
+            }
+
+            setJugadorPreSel(null)
+            await fetchPicks(user.id)
+            await fetchDraft()
+        } finally {
+            setConfirmant(false)
         }
-        setJugadorPreSel(null)
-        setConfirmant(false)
     }
 
     useEffect(() => {

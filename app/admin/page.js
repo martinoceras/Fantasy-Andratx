@@ -867,7 +867,8 @@ export default function Admin() {
                                 <p className="text-gray-600 text-sm">Encara no hi ha picks.</p>
                             ) : (
                                 <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
-                                    {[...picksDraft].reverse().map((pick) => {
+                                    {[...picksDraft].reverse().map((pick, idx) => {
+                                        const esDarrerPick = idx === 0
                                         const propietari = participants.find(p => p.id === pick.user_id)
                                         const jugador    = allPlayers.find(p => p.id === pick.player_id)
                                         return (
@@ -885,7 +886,12 @@ export default function Admin() {
                                                 </button>
                                                 <button
                                                     onClick={() => desferPick(pick)}
-                                                    className="text-red-400 hover:text-red-300 text-xs border border-red-800 hover:border-red-600 rounded px-2 py-1 transition">
+                                                    disabled={!esDarrerPick}
+                                                    title={esDarrerPick ? 'Desfer darrer pick' : 'Nomes es pot desfer el darrer pick'}
+                                                    className={`text-xs border rounded px-2 py-1 transition ${esDarrerPick
+                                                        ? 'text-red-400 hover:text-red-300 border-red-800 hover:border-red-600'
+                                                        : 'text-gray-600 border-gray-700 cursor-not-allowed'
+                                                    }`}>
                                                     ✕ Desfer
                                                 </button>
                                             </div>
