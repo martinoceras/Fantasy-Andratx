@@ -158,6 +158,10 @@ export default function Draft() {
         }
         setConfirmant(true)
         const ordre = draft.ordre_participants || []
+        const totalTorns = draft.max_jugadors * ordre.length
+        const nouTorn = draft.torn_actual + 1
+        const esDraftFinalitzat = nouTorn >= totalTorns
+
         const ronda = Math.floor(draft.torn_actual / ordre.length)
         const esParell = ronda % 2 === 0
         const ordenat = esParell ? ordre : [...ordre].reverse()
@@ -172,22 +176,25 @@ export default function Draft() {
             temps_seleccio: tornSegons,
         })
         await supabase.from('drafts').update({
-            torn_actual: draft.torn_actual + 1,
-            torn_iniciat_at: new Date().toISOString(),
+            torn_actual: nouTorn,
+            torn_iniciat_at: esDraftFinalitzat ? null : new Date().toISOString(),
             pausat_at: null,
             temps_pausat_acumulat: 0,
+            ...(esDraftFinalitzat && { estat: 'finalitzat' }),
         }).eq('id', draft.id)
 
-        const seguent = participants.find(p => p.id === seguentUserId)
-        if (seguent?.email) {
-            await fetch('/api/notify-torn', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: seguent.email, nom: seguent.nom || seguent.email,
-                    torn: draft.torn_actual + 2, jugadorsTriats: picks.length + 1
+        if (!esDraftFinalitzat) {
+            const seguent = participants.find(p => p.id === seguentUserId)
+            if (seguent?.email) {
+                await fetch('/api/notify-torn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: seguent.email, nom: seguent.nom || seguent.email,
+                        torn: nouTorn + 1, jugadorsTriats: picks.length + 1
+                    })
                 })
-            })
+            }
         }
         setJugadorPreSel(null)
         setConfirmant(false)
@@ -476,7 +483,14 @@ export default function Draft() {
                     </div>
 
                     {/* ── Banner estat (pendent o torn actual) ── */}
-                    {draft?.estat === 'pendent' ? (
+                    {draft?.estat === 'finalitzat' ? (
+                        <div className="bg-gradient-to-r from-yellow-900/60 to-green-900/60 border border-yellow-500 rounded-xl p-6 mb-5 text-center">
+                            <div className="text-4xl mb-2">🏆</div>
+                            <h2 className="text-yellow-400 font-bold text-2xl mb-1">DRAFT ACABAT!</h2>
+                            <p className="text-white font-semibold text-lg">Ja comença la lliga! Cada participant té el seu equip assignat.</p>
+                            <p className="text-gray-300 text-sm mt-2">Pots consultar els equips a la pestanya <span className="text-blue-400 font-semibold">👥 Seleccionats</span>.</p>
+                        </div>
+                    ) : draft?.estat === 'pendent' ? (
                         <div className="bg-gray-900 border border-yellow-700/50 rounded-xl p-3 mb-5 text-center">
                             <p className="text-yellow-400 font-semibold text-sm">⏳ El draft encara no ha començat — pots explorar els jugadors disponibles</p>
                         </div>
@@ -505,7 +519,7 @@ export default function Draft() {
                     ) : null}
 
                     {/* ── Layout principal: jugadors + panell ordre ── */}
-                    {(draft?.estat === 'pendent' || draft?.estat === 'actiu' || draft?.estat === 'pausat') && (
+                    {(draft?.estat === 'pendent' || draft?.estat === 'actiu' || draft?.estat === 'pausat' || draft?.estat === 'finalitzat') && (
                         <div className="flex gap-5 items-start flex-col xl:flex-row">
 
                                 {/* ── ESQUERRA: Jugadors ── */}

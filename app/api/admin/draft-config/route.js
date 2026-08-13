@@ -117,6 +117,11 @@ export async function POST(request) {
       updatePayload.temps_pausat_acumulat = Math.max(0, Number(draft?.temps_pausat_acumulat) || 0)
     } else if (action === 'save-config') {
       // No extra validation required here.
+      // Don't change estat if draft is already finalitzat
+      if (draft.estat === 'finalitzat') {
+        delete updatePayload.ordre_participants
+        // only allow saving max_jugadors config when finalitzat
+      }
     } else {
       return Response.json({ ok: false, error: 'Accio no suportada' }, { status: 400 })
     }
@@ -137,6 +142,7 @@ export async function POST(request) {
     return Response.json({ ok: false, error: error.message || 'Error desant draft' }, { status: 500 })
   }
 }
+
 
 
 

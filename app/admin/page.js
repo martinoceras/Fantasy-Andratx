@@ -694,12 +694,14 @@ export default function Admin() {
                     <div>
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-6">
                             <p className="text-gray-400 text-sm">Estat:
-                                <span className={`ml-2 font-semibold ${draft?.estat === 'actiu' ? 'text-green-400' : draft?.estat === 'pausat' ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                <span className={`ml-2 font-semibold ${draft?.estat === 'actiu' ? 'text-green-400' : draft?.estat === 'pausat' ? 'text-orange-400' : draft?.estat === 'finalitzat' ? 'text-yellow-400' : 'text-yellow-600'}`}>
                                     {draft?.estat === 'actiu'
                                         ? '🟢 Actiu · Torn ' + (draft.torn_actual + 1)
                                         : draft?.estat === 'pausat'
                                             ? '⏸️ Pausat · Torn ' + ((draft?.torn_actual || 0) + 1)
-                                            : '🟡 Pendent'}
+                                            : draft?.estat === 'finalitzat'
+                                                ? '🏆 Finalitzat'
+                                                : '🟡 Pendent'}
                                 </span>
                             </p>
                             <p className="text-gray-400 text-sm mt-1">Màxim jugadors per equip: <span className="text-white font-semibold">{maxJugadors}</span></p>
@@ -808,18 +810,20 @@ export default function Admin() {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <button
                                     onClick={iniciarDraft}
-                                    disabled={draft?.estat === 'actiu' || draft?.estat === 'pausat' || ordre.length < 2 || desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft}
+                                    disabled={draft?.estat === 'actiu' || draft?.estat === 'pausat' || draft?.estat === 'finalitzat' || ordre.length < 2 || desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft}
                                     className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
                                 >
                                     {iniciantDraftAdmin
                                         ? 'Iniciant draft...'
-                                        : draft?.estat === 'actiu'
-                                        ? '✅ Draft ja iniciat'
-                                        : draft?.estat === 'pausat'
-                                            ? 'Draft pausat'
-                                            : ordre.length < 2
-                                                ? 'Calen almenys 2 participants'
-                                                : '🚀 Inici draft'}
+                                        : draft?.estat === 'finalitzat'
+                                            ? '🏆 Draft finalitzat'
+                                            : draft?.estat === 'actiu'
+                                            ? '✅ Draft ja iniciat'
+                                            : draft?.estat === 'pausat'
+                                                ? 'Draft pausat'
+                                                : ordre.length < 2
+                                                    ? 'Calen almenys 2 participants'
+                                                    : '🚀 Inici draft'}
                                 </button>
                                 <button
                                     onClick={pausarDraft}
