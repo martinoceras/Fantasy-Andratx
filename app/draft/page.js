@@ -209,10 +209,16 @@ export default function Draft() {
 
         const canal = supabase.channel('draft-canal')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_picks' }, () => {
-                supabase.auth.getUser().then(({ data }) => fetchPicks(data.user?.id))
+                supabase.auth.getUser().then(({ data }) => {
+                    void fetchPicks(data.user?.id)
+                    void fetchDraft()
+                })
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'drafts' }, () => {
-                fetchDraft()
+                supabase.auth.getUser().then(({ data }) => {
+                    void fetchDraft()
+                    void fetchPicks(data.user?.id)
+                })
             })
             .subscribe()
 
