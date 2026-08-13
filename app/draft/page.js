@@ -744,11 +744,16 @@ export default function Draft() {
                                                             {jugadors.map(j => {
                                                                 const colors = POS_COLORS[j.posicion]
                                                                 return (
-                                                                    <div key={j.id} className="flex items-center gap-2 bg-gray-800 rounded-lg px-2 py-1.5">
-                                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${colors.bg} ${colors.text}`}>
+                                                                    <div key={j.id} className="flex items-center gap-2 bg-gray-800 rounded-lg px-2 py-2">
+                                                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${colors.bg} ${colors.text}`}>
                                                                             {j.posicion?.slice(0, 3).toUpperCase()}
                                                                         </span>
-                                                                        <span className="text-white text-xs truncate flex-1">{j.nombre}</span>
+                                                                        <div className="flex flex-col flex-1 min-w-0">
+                                                                            <span className="text-white text-sm font-semibold truncate leading-tight">{j.nombre}</span>
+                                                                            {j.equipo_real && (
+                                                                                <span className="text-white text-xs opacity-70 truncate leading-tight">{j.equipo_real}</span>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
                                                                 )
                                                             })}
@@ -790,13 +795,13 @@ export default function Draft() {
                                                         {t + 1}
                                                     </span>
                                                     <span className={`text-xs flex-1 truncate font-medium
-                                                        ${esCurrent ? 'text-green-300' : esMeu ? 'text-yellow-300' : 'text-gray-300'}`}>
+                                                        ${esCurrent ? 'text-green-300 font-bold' : esMeu ? 'text-yellow-300' : esPassat ? 'text-gray-400' : 'text-white'}`}>
                                                         {nom}
-                                                        {esMeu && !esCurrent && <span className="text-gray-600 text-[10px] ml-1">(tu)</span>}
+                                                        {esMeu && !esCurrent && <span className="text-gray-500 text-[10px] ml-1">(tu)</span>}
                                                     </span>
                                                     {esCurrent && <span className="text-green-400 text-xs">←</span>}
                                                     {esPassat && (
-                                                        <span className="text-gray-600 text-[10px]">
+                                                        <span className="text-cyan-400 text-[11px] font-medium">
                                                             {picksDetall.find(pk => {
                                                                 const r = Math.floor(t / n)
                                                                 const ord = r % 2 === 0 ? ordre : [...ordre].reverse()
