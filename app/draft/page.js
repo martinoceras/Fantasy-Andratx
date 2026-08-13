@@ -34,10 +34,12 @@ export default function Draft() {
     const router = useRouter()
 
     function segonsTornActual() {
-        if (!draft?.torn_iniciat_at) return 0
+        const acumulat = Math.max(0, Number(draft?.temps_pausat_acumulat) || 0)
+        if (draft?.estat === 'pausat') return acumulat
+        if (!draft?.torn_iniciat_at) return acumulat
         const inici = new Date(draft.torn_iniciat_at).getTime()
-        if (Number.isNaN(inici)) return 0
-        return Math.max(0, Math.floor((araTs - inici) / 1000))
+        if (Number.isNaN(inici)) return acumulat
+        return acumulat + Math.max(0, Math.floor((araTs - inici) / 1000))
     }
 
     function formatTemps(segonsTotals) {
@@ -108,7 +110,12 @@ export default function Draft() {
     }, [])
 
     const fetchDraft = useCallback(async () => {
-        const { data } = await supabase.from('drafts').select('*').single()
+        const { data } = await supabase
+            .from('drafts')
+            .select('*')
+            .order('id', { ascending: true })
+            .limit(1)
+            .maybeSingle()
         setDraft(data)
     }, [])
 
@@ -123,7 +130,7 @@ export default function Draft() {
     }, [fetchDraft, fetchParticipants, fetchPicks, fetchPlayers, fetchPuntsJornades])
 
     async function pickPlayer(playerId) {
-        if (!user || !draft || !esMeuTorn) return
+        if (!user || !draft || draft.estat !== 'actiu' || !esMeuTorn) return
         const playerData = players.find(p => p.id === playerId)
         const tornSegons = segonsTornActual()
 
@@ -167,6 +174,8 @@ export default function Draft() {
         await supabase.from('drafts').update({
             torn_actual: draft.torn_actual + 1,
             torn_iniciat_at: new Date().toISOString(),
+            pausat_at: null,
+            temps_pausat_acumulat: 0,
         }).eq('id', draft.id)
 
         const seguent = participants.find(p => p.id === seguentUserId)
@@ -209,12 +218,15 @@ export default function Draft() {
 
     // ── Derived state ────────────────────────────────────────────────
     const ordre = draft?.ordre_participants || []
+    const esDraftActiu = draft?.estat === 'actiu'
+    const esDraftPausat = draft?.estat === 'pausat'
     const n = ordre.length || 1
     const rondaActual = draft ? Math.floor(draft.torn_actual / n) : 0
     const ordenatActual = rondaActual % 2 === 0 ? ordre : [...ordre].reverse()
     const posActual = draft ? draft.torn_actual % n : 0
     const userActual = ordenatActual[posActual]
-    const esMeuTorn = userActual === user?.id
+    const esMeuTorn = esDraftActiu && userActual === user?.id
+    const esMeuTornPausat = esDraftPausat && userActual === user?.id
     const nomActual = participants.find(p => p.id === userActual)?.nom || '...'
     const segonsTurn = segonsTornActual()
     const minutsTurn = Math.floor(segonsTurn / 60)
@@ -481,10 +493,19 @@ export default function Draft() {
                                 </p>
                             )}
                         </div>
+                    ) : draft?.estat === 'pausat' ? (
+                        <div className="bg-orange-900/40 border border-orange-500 rounded-xl p-3 mb-5 text-center">
+                            <p className="text-xs text-orange-300 mb-0.5">⏸️ Draft pausat</p>
+                            <p className="text-white font-semibold">
+                                {esMeuTornPausat
+                                    ? 'El teu torn està pausat. El temps no continua comptant fins que l\'admin el reactivi.'
+                                    : `El torn de ${nomActual} està pausat. El temps està congelat fins que l'admin el reactivi.`}
+                            </p>
+                        </div>
                     ) : null}
 
                     {/* ── Layout principal: jugadors + panell ordre ── */}
-                    {(draft?.estat === 'pendent' || draft?.estat === 'actiu') && (
+                    {(draft?.estat === 'pendent' || draft?.estat === 'actiu' || draft?.estat === 'pausat') && (
                         <div className="flex gap-5 items-start flex-col xl:flex-row">
 
                                 {/* ── ESQUERRA: Jugadors ── */}
@@ -636,7 +657,7 @@ export default function Draft() {
                                                 const comptEquip = meusDeEquipReal(player.equipo_real)
                                                 const limitEquip = !meu && comptEquip >= maxEquip
                                                 const limitPosicio = !meu && meusDePos(player.posicion) >= (LIMIT_POSICIO[player.posicion] ?? 99)
-                                                const pot        = esMeuTorn && !agafat && !limitEquip && !limitPosicio
+                                                 const pot        = esDraftActiu && esMeuTorn && !agafat && !limitEquip && !limitPosicio
                                                 const colors     = POS_COLORS[player.posicion]
                                                 return renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, limitPosicio, pot, colors })
                                             })}
@@ -671,7 +692,7 @@ export default function Draft() {
                                                                 const comptEquip = meusDeEquipReal(player.equipo_real)
                                                                 const limitEquip  = !meu && comptEquip >= maxEquip
                                                                 const limitPosicio = !meu && comptActualPos >= maxPosActual
-                                                                const pot        = esMeuTorn && !agafat && !limitEquip && !limitPosicio
+                                                                 const pot        = esDraftActiu && esMeuTorn && !agafat && !limitEquip && !limitPosicio
                                                                 return renderCard(player, { agafat, meu, owner, comptEquip, limitEquip, limitPosicio, pot, colors })
                                                             })}
                                                         </div>
@@ -725,9 +746,9 @@ export default function Draft() {
                                             <p className="text-gray-500 text-xs mt-0.5">
                                                 {picks.length} picks realitzats · {ordre.length} participants
                                             </p>
-                                            {draft?.estat === 'actiu' && (
+                                            {(draft?.estat === 'actiu' || draft?.estat === 'pausat') && (
                                                 <p className={`text-xs mt-1 font-semibold ${colorTemps}`}>
-                                                    ⏱️ Torn actual: {formatTemps(segonsTurn)}
+                                                    {draft?.estat === 'pausat' ? '⏸️ Temps congelat: ' : '⏱️ Torn actual: '}{formatTemps(segonsTurn)}
                                                 </p>
                                             )}
                                         </div>

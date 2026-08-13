@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
@@ -11,6 +14,11 @@ const ESCUDO_BASE   = 'https://biwenger.as.com/res/images/clubs/badge_'    // + 
 
 const POS_MAP = { 1: 'Porter', 2: 'Defensa', 3: 'Migcampista', 4: 'Davanter' }
 
+function normalizeText(value, fallback = '') {
+    const text = typeof value === 'string' ? value.trim() : ''
+    return text || fallback
+}
+
 function calcValor(price) {
     if (!price) return 6
     if (price >= 70_000_000) return 10
@@ -21,7 +29,8 @@ function calcValor(price) {
 }
 
 async function doSync() {
-    const res = await fetch(BIWENGER_URL, {
+    const url = `${BIWENGER_URL}&_ts=${Date.now()}`
+    const res = await fetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         cache: 'no-store'
     })
@@ -31,21 +40,33 @@ async function doSync() {
     const teamsRaw   = json.data?.teams   || {}
     const playersRaw = json.data?.players || {}
 
+    if (!Object.keys(teamsRaw).length || !Object.keys(playersRaw).length) {
+        throw new Error('Resposta de Biwenger incompleta: sense equips o jugadors')
+    }
+
+    const { data: previousPlayers, error: previousError } = await supabaseAdmin
+        .from('players')
+        .select('id, nombre, equipo_real, posicion')
+    if (previousError) throw new Error(previousError.message)
+
     // Mapa equips id → nom
     const teamNames = {}
-    Object.values(teamsRaw).forEach(t => { teamNames[t.id] = t.name })
+    Object.values(teamsRaw).forEach(t => {
+        if (!t?.id) return
+        teamNames[t.id] = normalizeText(t.name, 'Desconegut')
+    })
 
     // Mapeig jugadors — camps correctes: team (no teamID), price (no fantasyPrice)
     const jugadors = Object.values(playersRaw)
-        .filter(p => POS_MAP[p.position])
+        .filter(p => POS_MAP[p?.position] && Number.isInteger(Number(p?.id)))
         .map(p => {
             // El camp equip pot venir com a p.team o p.teamID
             const teamId = p.team ?? p.teamID ?? null
             return {
-                id:            p.id,
-                nombre:        p.name,
+                id:            Number(p.id),
+                nombre:        normalizeText(p.name, `Jugador ${p.id}`),
                 posicion:      POS_MAP[p.position],
-                equipo_real:   teamNames[teamId] || 'Transferits',
+                equipo_real:   teamNames[teamId] || normalizeText(p.teamName, 'Transferits'),
                 valor:         calcValor(p.price ?? p.fantasyPrice),
                 precio:        p.price ?? p.fantasyPrice ?? 0,
                 punts_totals:  p.points ?? 0,
@@ -56,6 +77,25 @@ async function doSync() {
             }
         })
 
+    if (!jugadors.length) {
+        throw new Error('Biwenger no ha retornat jugadors vàlids')
+    }
+
+    const previousById = new Map((previousPlayers || []).map((p) => [Number(p.id), p]))
+    const currentIdSet = new Set(jugadors.map((p) => p.id))
+    const altes = jugadors
+        .filter((p) => !previousById.has(p.id))
+        .map((p) => ({ id: p.id, nombre: p.nombre, equipo_real: p.equipo_real, posicion: p.posicion }))
+
+    const baixes = (previousPlayers || [])
+        .filter((p) => !currentIdSet.has(Number(p.id)))
+        .map((p) => ({
+            id: Number(p.id),
+            nombre: normalizeText(p.nombre, `Jugador ${p.id}`),
+            equipo_real: normalizeText(p.equipo_real, 'Sense equip'),
+            posicion: normalizeText(p.posicion, '-'),
+        }))
+
     // Upsert — usa 'id' com a clau de conflicte
     const { error } = await supabaseAdmin
         .from('players')
@@ -63,14 +103,23 @@ async function doSync() {
 
     if (error) throw new Error(error.message)
 
-    // Neteja dades antigues que ja s'havien guardat com a 'Desconegut'
-    const { error: updateError } = await supabaseAdmin
-        .from('players')
-        .update({ equipo_real: 'Transferits' })
-        .eq('equipo_real', 'Desconegut')
+    // Sincronització estricta: la taula local ha de reflectir exactament Biwenger
+    const { data: totsPlayers, error: errPlayers } = await supabaseAdmin.from('players').select('id')
+    if (errPlayers) throw new Error(errPlayers.message)
 
-    if (updateError) throw new Error(updateError.message)
-    return jugadors.length
+    const idsBorrar = (totsPlayers || [])
+        .map((p) => Number(p.id))
+        .filter((id) => Number.isInteger(id) && !currentIdSet.has(id))
+
+    if (idsBorrar.length) {
+        const { error: deleteError } = await supabaseAdmin
+            .from('players')
+            .delete()
+            .in('id', idsBorrar)
+        if (deleteError) throw new Error(deleteError.message)
+    }
+
+    return { total: jugadors.length, eliminats: idsBorrar.length, altes, baixes }
 }
 
 export async function POST(request) {
@@ -79,8 +128,15 @@ export async function POST(request) {
         return Response.json({ error: 'No autoritzat' }, { status: 401 })
     }
     try {
-        const total = await doSync()
-        return Response.json({ ok: true, total, message: `${total} jugadors sincronitzats correctament` })
+        const result = await doSync()
+        return Response.json({
+            ok: true,
+            total: result.total,
+            eliminats: result.eliminats,
+            altes: result.altes,
+            baixes: result.baixes,
+            message: `${result.total} jugadors actius sincronitzats · ${result.eliminats} obsolets eliminats`
+        })
     } catch (err) {
         return Response.json({ error: err.message }, { status: 500 })
     }
@@ -93,10 +149,18 @@ export async function GET(request) {
         return Response.json({ error: 'No autoritzat' }, { status: 401 })
     }
     try {
-        const total = await doSync()
-        return Response.json({ ok: true, total, message: `Cron: ${total} jugadors sincronitzats` })
+        const result = await doSync()
+        return Response.json({
+            ok: true,
+            total: result.total,
+            eliminats: result.eliminats,
+            altes: result.altes,
+            baixes: result.baixes,
+            message: `Cron: ${result.total} actius · ${result.eliminats} eliminats`
+        })
     } catch (err) {
         return Response.json({ error: err.message }, { status: 500 })
     }
 }
+
 

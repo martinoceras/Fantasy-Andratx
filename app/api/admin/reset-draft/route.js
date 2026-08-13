@@ -14,7 +14,14 @@ export async function POST() {
 
     const { error: errDraft } = await supabaseAdmin
         .from('drafts')
-        .update({ estat: 'pendent', torn_actual: 0, ordre_participants: [] })
+        .update({
+            estat: 'pendent',
+            torn_actual: 0,
+            ordre_participants: [],
+            torn_iniciat_at: null,
+            pausat_at: null,
+            temps_pausat_acumulat: 0,
+        })
         .neq('id', 0)
     if (errDraft) return Response.json({ error: errDraft.message }, { status: 400 })
 

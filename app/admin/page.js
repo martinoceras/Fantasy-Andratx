@@ -45,6 +45,7 @@ export default function Admin() {
     // Secció sync jugadors
     const [sincronitzant, setSincronitzant] = useState(false)
     const [missatgeSync, setMissatgeSync] = useState('')
+    const [resumCanvisSync, setResumCanvisSync] = useState(null)
 
     // Secció canvis
     const [iniciantCanvis, setIniciantCanvis] = useState(false)
@@ -60,6 +61,10 @@ export default function Admin() {
     const [reiniciantPunts, setReiniciantPunts] = useState(false)
     const [missatgeClass, setMissatgeClass]   = useState('')
     const [resetantDraft, setResetantDraft]   = useState(false)
+    const [pausantDraft, setPausantDraft]     = useState(false)
+    const [reactivantDraft, setReactivantDraft] = useState(false)
+    const [desantConfiguracioDraft, setDesantConfiguracioDraft] = useState(false)
+    const [iniciantDraftAdmin, setIniciantDraftAdmin] = useState(false)
 
     // Gestió picks draft (desfer / canviar jugador)
     const [picksDraft, setPicksDraft]           = useState([])
@@ -80,20 +85,31 @@ export default function Admin() {
         }
     }
 
+    function aplicarDraftLocal(draftData) {
+        setDraft(draftData || null)
+        setOrdre(Array.isArray(draftData?.ordre_participants) ? draftData.ordre_participants : [])
+        setMaxJugadors(Number(draftData?.max_jugadors) || 15)
+        setMaxJugadorsEquip(Number(draftData?.max_jugadors_equip) || 4)
+    }
+
+    function mostrarMissatge(text, ms = 3000) {
+        setMissatge(text)
+        setTimeout(() => setMissatge(''), ms)
+    }
+
     const fetchTot = useCallback(async () => {
         // Llegir usuaris via API amb service key (evita bloqueig RLS al client)
         const resUsers = await fetch('/api/admin/get-users')
         const usersPayload = await resUsers.json()
         const users = resUsers.ok ? usersPayload?.users : []
 
-        const { data: draftData } = await supabase.from('drafts').select('*').single()
+        const resDraft = await fetch('/api/admin/draft-config', { cache: 'no-store' })
+        const draftPayload = await resDraft.json().catch(() => ({}))
+        const draftData = resDraft.ok ? draftPayload?.draft : null
         const { data: playersData } = await supabase.from('players').select('id, nombre, posicion').order('posicion').order('nombre')
         const { data: classData } = await supabase.from('classificacio_arxivada').select('*').order('created_at', { ascending: false })
         setParticipants(users || [])
-        setDraft(draftData)
-        setOrdre(draftData?.ordre_participants || [])
-        setMaxJugadors(draftData?.max_jugadors || 15)
-        setMaxJugadorsEquip(draftData?.max_jugadors_equip || 4)
+        aplicarDraftLocal(draftData)
         setPlayers(playersData || [])
         setAllPlayers(playersData || [])
         setClassificacionsArxivades(classData || [])
@@ -107,6 +123,39 @@ export default function Admin() {
             void fetchTot()
         })
     }, [fetchTot])
+
+    async function actualitzarDraftAdmin(action, missatgeExit, loadingSetter, includeConfig = true) {
+        loadingSetter?.(true)
+        try {
+            const body = { action }
+            if (includeConfig) {
+                body.ordre = ordre
+                body.maxJugadors = maxJugadors
+                body.maxJugadorsEquip = maxJugadorsEquip
+            }
+
+            const res = await fetch('/api/admin/draft-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            })
+            const data = await res.json().catch(() => ({}))
+
+            if (!res.ok || data.error) {
+                mostrarMissatge('❌ Error: ' + (data.error || 'No s\'ha pogut actualitzar el draft'), 5000)
+                return { ok: false, data: null }
+            }
+
+            aplicarDraftLocal(data?.draft)
+            if (missatgeExit) mostrarMissatge(missatgeExit)
+            return { ok: true, data }
+        } catch (error) {
+            mostrarMissatge('❌ Error: ' + error.message, 5000)
+            return { ok: false, data: null }
+        } finally {
+            loadingSetter?.(false)
+        }
+    }
 
     async function calcularClassificacioActual(perfils) {
         const { data: allPunts } = await supabase.from('player_punts').select('player_id, punts')
@@ -203,7 +252,13 @@ export default function Admin() {
     async function desferPick(pick) {
         if (!confirm('Segur que vols desfer aquesta elecció? El torn tornarà a aquest punt.')) return
         await supabase.from('draft_picks').delete().eq('id', pick.id)
-        await supabase.from('drafts').update({ estat: 'actiu', torn_actual: pick.torn }).eq('id', draft.id)
+        await supabase.from('drafts').update({
+            estat: 'actiu',
+            torn_actual: pick.torn,
+            torn_iniciat_at: new Date().toISOString(),
+            pausat_at: null,
+            temps_pausat_acumulat: 0,
+        }).eq('id', draft.id)
         setMissatgeDraft('✓ Elecció desfeta. Torn reiniciat.')
         await carregarPicksDraft()
         await fetchTot()
@@ -243,23 +298,14 @@ export default function Admin() {
     }
 
     async function guardarOpcions() {
-        await supabase.from('drafts').update({
-            ordre_participants: ordre,
-            max_jugadors: maxJugadors,
-            max_jugadors_equip: maxJugadorsEquip
-        }).eq('id', draft.id)
-        setMissatge('✓ Opcions guardades correctament!')
-        setTimeout(() => setMissatge(''), 3000)
+        await actualitzarDraftAdmin('save-config', 'El draft s\'ha guardat correctament.', setDesantConfiguracioDraft)
     }
 
     async function iniciarDraft() {
         if (ordre.length < 2) return alert('Necessites almenys 2 participants!')
-        await supabase.from('drafts').update({
-            ordre_participants: ordre,
-            max_jugadors: maxJugadors,
-            estat: 'actiu',
-            torn_actual: 0
-        }).eq('id', draft.id)
+        const result = await actualitzarDraftAdmin('start-draft', 'El draft s\'ha iniciat correctament.', setIniciantDraftAdmin)
+        if (!result.ok) return
+
         const primer = participants.find(p => p.id === ordre[0])
         if (primer?.email) {
             await fetch('/api/notify-torn', {
@@ -268,12 +314,19 @@ export default function Admin() {
                 body: JSON.stringify({ email: primer.email, nom: primer.nom || primer.email, torn: 1, jugadorsTriats: 0 })
             })
         }
-        setMissatge('🚀 Draft iniciat! Email enviat al primer participant.')
-        fetchTot()
+        void fetchTot()
+    }
+
+    async function pausarDraft() {
+        await actualitzarDraftAdmin('pause-draft', 'El draft s\'ha pausat correctament.', setPausantDraft, false)
+    }
+
+    async function reactivarDraft() {
+        await actualitzarDraftAdmin('resume-draft', 'El draft s\'ha reactivat correctament.', setReactivantDraft, false)
     }
 
     async function resetDraft() {
-        if (!confirm('Segur que vols reiniciar el draft?')) return
+        if (!confirm('Segur que vols fer un reset del draft?\n\nAixò eliminarà tots els jugadors assignats a cada usuari i es tornarà a començar l\'elecció de jugadors des de zero.')) return
         setResetantDraft(true)
         try {
             const res = await fetch('/api/admin/reset-draft', {
@@ -417,8 +470,15 @@ export default function Admin() {
                 body: JSON.stringify({ secret: process.env.NEXT_PUBLIC_SYNC_SECRET || '' })
             })
             const data = await res.json()
-            if (data.error) setMissatgeSync('❌ Error: ' + data.error)
-            else setMissatgeSync(`✓ ${data.message}`)
+            if (!res.ok || data.error) {
+                setMissatgeSync('❌ Error: ' + (data.error || 'No s\'ha pogut sincronitzar'))
+            } else {
+                setMissatgeSync(`✓ ${data.message}`)
+                setResumCanvisSync({
+                    altes: Array.isArray(data.altes) ? data.altes : [],
+                    baixes: Array.isArray(data.baixes) ? data.baixes : [],
+                })
+            }
             // Recarreguem la llista de players
             const { data: playersData } = await supabase.from('players').select('id, nombre, posicion').order('posicion').order('nombre')
             setPlayers(playersData || [])
@@ -634,8 +694,12 @@ export default function Admin() {
                     <div>
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-6">
                             <p className="text-gray-400 text-sm">Estat:
-                                <span className={`ml-2 font-semibold ${draft?.estat === 'actiu' ? 'text-green-400' : 'text-yellow-400'}`}>
-                                    {draft?.estat === 'actiu' ? '🟢 Actiu · Torn ' + (draft.torn_actual + 1) : '🟡 Pendent'}
+                                <span className={`ml-2 font-semibold ${draft?.estat === 'actiu' ? 'text-green-400' : draft?.estat === 'pausat' ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                    {draft?.estat === 'actiu'
+                                        ? '🟢 Actiu · Torn ' + (draft.torn_actual + 1)
+                                        : draft?.estat === 'pausat'
+                                            ? '⏸️ Pausat · Torn ' + ((draft?.torn_actual || 0) + 1)
+                                            : '🟡 Pendent'}
                                 </span>
                             </p>
                             <p className="text-gray-400 text-sm mt-1">Màxim jugadors per equip: <span className="text-white font-semibold">{maxJugadors}</span></p>
@@ -733,16 +797,51 @@ export default function Admin() {
                             </div>
                         )}
 
-                        <div className="flex gap-3">
-                            <button onClick={guardarOpcions} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-semibold transition">
-                                Guardar ordre
+                        <div className="space-y-3">
+                            <button
+                                onClick={guardarOpcions}
+                                disabled={desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft}
+                                className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
+                            >
+                                {desantConfiguracioDraft ? 'Desant ordre...' : 'Guardar ordre'}
                             </button>
-                            {draft?.estat === 'pendent' && ordre.length >= 2 && (
-                                <button onClick={iniciarDraft} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 rounded-lg font-semibold transition">
-                                    🚀 Iniciar Draft
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <button
+                                    onClick={iniciarDraft}
+                                    disabled={draft?.estat === 'actiu' || draft?.estat === 'pausat' || ordre.length < 2 || desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft}
+                                    className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
+                                >
+                                    {iniciantDraftAdmin
+                                        ? 'Iniciant draft...'
+                                        : draft?.estat === 'actiu'
+                                        ? '✅ Draft ja iniciat'
+                                        : draft?.estat === 'pausat'
+                                            ? 'Draft pausat'
+                                            : ordre.length < 2
+                                                ? 'Calen almenys 2 participants'
+                                                : '🚀 Inici draft'}
                                 </button>
+                                <button
+                                    onClick={pausarDraft}
+                                    disabled={draft?.estat !== 'actiu' || pausantDraft || reactivantDraft || resetantDraft}
+                                    className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
+                                >
+                                    {pausantDraft ? 'Pausant...' : '⏸️ Pausar draft'}
+                                </button>
+                                <button
+                                    onClick={reactivarDraft}
+                                    disabled={draft?.estat !== 'pausat' || pausantDraft || reactivantDraft || resetantDraft}
+                                    className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
+                                >
+                                    {reactivantDraft ? 'Reactivant...' : '▶️ Reactivar draft'}
+                                </button>
+                            </div>
+                            {missatge && (
+                                <div className={`border px-4 py-3 rounded-lg text-sm ${missatge.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
+                                    {missatge}
+                                </div>
                             )}
-                            <button onClick={resetDraft} disabled={resetantDraft} className="bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-300 px-4 py-3 rounded-lg transition">
+                            <button onClick={resetDraft} disabled={resetantDraft} className="w-full bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-300 px-4 py-3 rounded-lg transition">
                                 {resetantDraft ? 'Reiniciant...' : '🔄 Reset Draft'}
                             </button>
                         </div>
@@ -1041,8 +1140,55 @@ export default function Admin() {
                             )}
 
                             <button onClick={sincronitzarJugadors} disabled={sincronitzant} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-3 rounded-lg font-semibold transition flex items-center justify-center gap-2">
-                                {sincronitzant ? (<><span className="animate-spin">⟳</span> Sincronitzant jugadors...</>) : ('🔄 Sincronitzar ara (551+ jugadors)')}
+                                {sincronitzant ? (<><span className="animate-spin">⟳</span> Sincronitzant jugadors...</>) : ('🔄 Sincronitzar ara')}
                             </button>
+
+                            <div className="mt-4 bg-gray-950 border border-gray-800 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                    <p className="text-white font-semibold text-sm">Altes i baixes de la darrera sincronització</p>
+                                    <span className="text-xs text-gray-500">Altes: {resumCanvisSync?.altes?.length || 0} · Baixes: {resumCanvisSync?.baixes?.length || 0}</span>
+                                </div>
+
+                                {!resumCanvisSync ? (
+                                    <p className="text-gray-500 text-sm">Prem &quot;Sincronitzar ara&quot; per veure altes i baixes.</p>
+                                ) : resumCanvisSync.altes.length === 0 && resumCanvisSync.baixes.length === 0 ? (
+                                    <p className="text-gray-400 text-sm">Mateixos jugadors que la darrera sincronització.</p>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="bg-gray-900 border border-green-900 rounded-lg p-3">
+                                            <p className="text-green-400 text-xs font-bold uppercase tracking-wider mb-2">Altes</p>
+                                            {resumCanvisSync.altes.length === 0 ? (
+                                                <p className="text-gray-500 text-sm">Mateixos jugadors que la darrera sincronització.</p>
+                                            ) : (
+                                                <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                                                    {resumCanvisSync.altes.map((p) => (
+                                                        <div key={`alta-${p.id}`} className="text-sm bg-gray-800 rounded px-2 py-1">
+                                                            <span className="text-white font-medium">{p.nombre}</span>
+                                                            <span className="text-gray-500 text-xs"> · {p.posicion} · {p.equipo_real}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="bg-gray-900 border border-red-900 rounded-lg p-3">
+                                            <p className="text-red-400 text-xs font-bold uppercase tracking-wider mb-2">Baixes</p>
+                                            {resumCanvisSync.baixes.length === 0 ? (
+                                                <p className="text-gray-500 text-sm">Sense baixes en aquesta sincronització.</p>
+                                            ) : (
+                                                <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                                                    {resumCanvisSync.baixes.map((p) => (
+                                                        <div key={`baixa-${p.id}`} className="text-sm bg-gray-800 rounded px-2 py-1">
+                                                            <span className="text-white font-medium">{p.nombre}</span>
+                                                            <span className="text-gray-500 text-xs"> · {p.posicion} · {p.equipo_real}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
