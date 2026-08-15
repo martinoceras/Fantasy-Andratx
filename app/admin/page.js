@@ -61,6 +61,7 @@ export default function Admin() {
     const [reiniciantPunts, setReiniciantPunts] = useState(false)
     const [missatgeClass, setMissatgeClass]   = useState('')
     const [resetantDraft, setResetantDraft]   = useState(false)
+    const [acabantDraftAleatori, setAcabantDraftAleatori] = useState(false)
     const [pausantDraft, setPausantDraft]     = useState(false)
     const [reactivantDraft, setReactivantDraft] = useState(false)
     const [desantConfiguracioDraft, setDesantConfiguracioDraft] = useState(false)
@@ -349,6 +350,35 @@ export default function Admin() {
         }
         setResetantDraft(false)
         setTimeout(() => setMissatge(''), 5000)
+    }
+
+    async function acabarDraftAleatori() {
+        if (!confirm('Vols acabar el draft de forma aleatoria?\n\nS\'ompliran tots els picks restants respectant limits de posicio i equip real. Aquesta accio no es pot desfer facilment.')) return
+        setAcabantDraftAleatori(true)
+        try {
+            const res = await fetch('/api/admin/finish-random-draft', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok || data.error || !data.ok) {
+                setMissatge(`❌ Error: ${data.error || 'No s\'ha pogut acabar el draft aleatori'}`)
+                setTimeout(() => setMissatge(''), 5000)
+                return
+            }
+
+            const cleaned = Number(data.cleanedPicks || 0)
+            const suffix = cleaned > 0 ? ` (neteja: ${cleaned} picks inconsistents).` : '.'
+            setMissatge(`🎲 Draft completat aleatoriament (${data.inserted || 0} picks nous)${suffix}`)
+            await fetchTot()
+            await carregarPicksDraft()
+            setTimeout(() => setMissatge(''), 5000)
+        } catch (e) {
+            setMissatge('❌ Error: ' + e.message)
+            setTimeout(() => setMissatge(''), 5000)
+        } finally {
+            setAcabantDraftAleatori(false)
+        }
     }
 
     async function crearUsuari() {
@@ -802,7 +832,7 @@ export default function Admin() {
                         <div className="space-y-3">
                             <button
                                 onClick={guardarOpcions}
-                                disabled={desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft}
+                                disabled={desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft || acabantDraftAleatori}
                                 className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
                             >
                                 {desantConfiguracioDraft ? 'Desant ordre...' : 'Guardar ordre'}
@@ -810,7 +840,7 @@ export default function Admin() {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <button
                                     onClick={iniciarDraft}
-                                    disabled={draft?.estat === 'actiu' || draft?.estat === 'pausat' || draft?.estat === 'finalitzat' || ordre.length < 2 || desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft}
+                                    disabled={draft?.estat === 'actiu' || draft?.estat === 'pausat' || draft?.estat === 'finalitzat' || ordre.length < 2 || desantConfiguracioDraft || iniciantDraftAdmin || pausantDraft || reactivantDraft || resetantDraft || acabantDraftAleatori}
                                     className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
                                 >
                                     {iniciantDraftAdmin
@@ -827,14 +857,14 @@ export default function Admin() {
                                 </button>
                                 <button
                                     onClick={pausarDraft}
-                                    disabled={draft?.estat !== 'actiu' || pausantDraft || reactivantDraft || resetantDraft}
+                                    disabled={draft?.estat !== 'actiu' || pausantDraft || reactivantDraft || resetantDraft || acabantDraftAleatori}
                                     className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
                                 >
                                     {pausantDraft ? 'Pausant...' : '⏸️ Pausar draft'}
                                 </button>
                                 <button
                                     onClick={reactivarDraft}
-                                    disabled={draft?.estat !== 'pausat' || pausantDraft || reactivantDraft || resetantDraft}
+                                    disabled={draft?.estat !== 'pausat' || pausantDraft || reactivantDraft || resetantDraft || acabantDraftAleatori}
                                     className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
                                 >
                                     {reactivantDraft ? 'Reactivant...' : '▶️ Reactivar draft'}
@@ -845,8 +875,15 @@ export default function Admin() {
                                     {missatge}
                                 </div>
                             )}
-                            <button onClick={resetDraft} disabled={resetantDraft} className="w-full bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-300 px-4 py-3 rounded-lg transition">
+                            <button onClick={resetDraft} disabled={resetantDraft || acabantDraftAleatori} className="w-full bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-300 px-4 py-3 rounded-lg transition">
                                 {resetantDraft ? 'Reiniciant...' : '🔄 Reset Draft'}
+                            </button>
+                            <button
+                                onClick={acabarDraftAleatori}
+                                disabled={acabantDraftAleatori || resetantDraft || draft?.estat === 'finalitzat' || draft?.estat === 'pendent'}
+                                className="w-full bg-purple-800 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-3 rounded-lg transition"
+                            >
+                                {acabantDraftAleatori ? 'Omplint picks aleatoris...' : '🎲 Acaba draft aleatori'}
                             </button>
                         </div>
 

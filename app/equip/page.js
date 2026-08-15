@@ -99,7 +99,7 @@ export default function Equip() {
         try {
             const params = new URLSearchParams()
             if (jornada) params.set('week', String(jornada))
-            const res = await fetch(`/api/laliga-calendar${params.toString() ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
+            const res = await fetch(`/api/biwenger-calendar${params.toString() ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
             const json = await res.json()
             if (!res.ok || !json?.ok) {
                 setCalendariError(json?.error || 'No s\'ha pogut carregar el calendari')
@@ -344,11 +344,15 @@ export default function Equip() {
         return jugador.posicion === posicio
     }
 
+    function mateixaPosicioReal(jugadorA, jugadorB) {
+        return !!jugadorA && !!jugadorB && jugadorA.posicion === jugadorB.posicion
+    }
+
     function nomCurt(nom) {
         if (!nom) return ''
         const parts = nom.trim().split(' ')
         const cognom = parts[parts.length - 1]
-        return cognom.length > 10 ? cognom.slice(0, 10) : cognom
+        return cognom.length > 14 ? cognom.slice(0, 14) : cognom
     }
 
     function handleClickSlot(posicio, index) {
@@ -371,6 +375,11 @@ export default function Equip() {
 
         const jugadorMovent = jugadors.find(j => j.id === seleccionat.id)
 
+        if (seleccionat.tipus === 'slot-buit' && jugadorActual) {
+            setSeleccionat({ tipus: 'titular', key, posicio, id: jugadorActual.id })
+            return
+        }
+
         // Validacio: el jugador que movem pot anar a aquesta posicio?
         if (jugadorMovent && !potJugarDe(jugadorMovent, posicio)) {
             alert(`${jugadorMovent.nombre} és ${jugadorMovent.posicion} i no pot jugar de ${posicio}`)
@@ -380,6 +389,11 @@ export default function Equip() {
 
         // Si hi ha un jugador al desti, validar que pot anar a l'origen
         if (jugadorActual && seleccionat.tipus === 'titular') {
+            if (!mateixaPosicioReal(jugadorActual, jugadorMovent)) {
+                alert(`${jugadorActual.nombre} és ${jugadorActual.posicion} i no coincideix amb ${jugadorMovent?.posicion || seleccionat.posicio}`)
+                setSeleccionat(null)
+                return
+            }
             if (!potJugarDe(jugadorActual, seleccionat.posicio)) {
                 alert(`${jugadorActual.nombre} és ${jugadorActual.posicion} i no pot jugar de ${seleccionat.posicio}`)
                 setSeleccionat(null)
@@ -462,7 +476,24 @@ export default function Equip() {
         }
 
         if (seleccionat.tipus === 'banqueta') {
-            // Canvi de seleccio dins banqueta
+            // Intercanvi directe entre jugadors de la mateixa posicio a banqueta.
+            if (seleccionat.posicio === posicio) {
+                const nousSuplents = { ...suplents }
+                const origenId = seleccionat.id
+                const destiId = jugadorId
+
+                if (origenId) nousSuplents[key] = origenId
+                else delete nousSuplents[key]
+
+                if (destiId) nousSuplents[seleccionat.key] = destiId
+                else delete nousSuplents[seleccionat.key]
+
+                setSuplents(nousSuplents)
+                setSeleccionat(null)
+                desarAuto(undefined, undefined, nousSuplents)
+                return
+            }
+
             setSeleccionat(jugador ? { tipus: 'banqueta', key, posicio, id: jugador.id } : null)
             return
         }
@@ -531,7 +562,7 @@ export default function Equip() {
                         <span className="text-white/25 text-base">+</span>
                     )}
                 </div>
-                <span className="text-white/80 text-[10px] mt-1 text-center truncate font-medium" style={{ width: labelWidth }}>
+                <span className="text-white/90 text-xs mt-1 text-center truncate font-semibold" style={{ width: labelWidth }}>
           {jugador ? nomCurt(jugador.nombre) : <span className="text-white/20 text-[9px]">{posicio.slice(0,3)}</span>}
         </span>
             </div>
@@ -655,22 +686,7 @@ export default function Equip() {
                     {/* Panell lateral */}
                     <div className="w-[430px] max-w-full flex-shrink-0 flex flex-col gap-3 min-w-0">
 
-                        {/* Info seleccionat */}
-                        {seleccionat && (
-                            <div className="bg-green-900/50 border border-green-600 rounded-xl p-3">
-                                <p className="text-green-300 text-sm font-semibold">
-                                    {seleccionat.id
-                                        ? `✓ ${jugadors.find(j => j.id === seleccionat.id)?.nombre} seleccionat`
-                                        : 'Slot buit — clica un jugador'}
-                                </p>
-                                <p className="text-green-500 text-xs mt-0.5">
-                                    Clica on el vols posar · slots compatibles parpadegen
-                                </p>
-                                <button onClick={() => setSeleccionat(null)} className="text-green-600 text-xs mt-1 hover:text-green-400">
-                                    Cancel·lar ✕
-                                </button>
-                            </div>
-                        )}
+                        {/* Info seleccionat ocult */}
 
                         {/* Banqueta per posicions i prioritat */}
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 overflow-y-auto" style={{ maxHeight: 560 }}>
@@ -712,7 +728,10 @@ export default function Equip() {
                                                                 : <span className="text-white/25 text-base">{index + 1}</span>
                                                             }
                                                         </div>
-                                                        <span className="text-[10px] text-gray-500 mt-1">#{index + 1}</span>
+                                                        <span className="text-[10px] text-gray-500 mt-1 font-semibold">{posicio.slice(0, 3).toUpperCase()} · #{index + 1}</span>
+                                                        <span className="text-white text-xs mt-0.5 text-center truncate w-full font-semibold">
+                                                            {jugador ? nomCurt(jugador.nombre) : '---'}
+                                                        </span>
                                                     </div>
                                                 )
                                             })}
@@ -728,13 +747,13 @@ export default function Equip() {
                     Clica un jugador → clica on el vols posar · Els canvis es desen automàticament
                 </p>
 
-                {/* CALENDARI LALIGA EA SPORTS — FULL WIDTH */}
+                {/* CALENDARI BIWENGER — FULL WIDTH */}
                 <div className="mt-8 w-full">
                     <div className="bg-gradient-to-b from-gray-800 to-gray-900 border-2 border-purple-500/40 rounded-2xl p-6 shadow-xl">
                         <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
                             <div>
-                                <h2 className="text-2xl font-bold text-purple-300">⚽ Calendari LALIGA EA SPORTS</h2>
-                                <p className="text-gray-400 text-xs mt-1">Vull els resultats oficials quan es publiquin</p>
+                                <h2 className="text-2xl font-bold text-purple-300">⚽ Calendari Biwenger</h2>
+                                <p className="text-gray-400 text-xs mt-1">Horaris oficials, jornades i partits des de Biwenger</p>
                             </div>
                             <select
                                 value={calendari.jornadaSeleccionada || ''}

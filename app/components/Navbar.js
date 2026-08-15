@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
 export default function Navbar() {
@@ -15,6 +15,7 @@ export default function Navbar() {
 
     const links = [
         { href: '/classificacio', label: '🏆 Classificació' },
+        { href: '/calendari',     label: '📅 Calendari' },
         { href: '/draft',         label: '⚽ Draft' },
         { href: '/equip',         label: '👤 El meu equip' },
         { href: '/canvis',        label: '🔄 Canvis' },

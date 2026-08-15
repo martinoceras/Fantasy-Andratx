@@ -1,6 +1,5 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import Image from 'next/image'
 import { supabase } from '../../lib/supabase'
 import Navbar from '../components/Navbar'
 import BiwengerAvatar from '../components/BiwengerAvatar'
@@ -149,6 +148,10 @@ export default function Canvis() {
 
     async function ferCanvi() {
         if (!playerOut || !playerIn || !canvisData || !user) return
+        if (playerOut.posicion !== playerIn.posicion) {
+            alert('El canvi ha de ser entre jugadors de la mateixa posicio.')
+            return
+        }
         setConfirmant(true)
         try {
             const { error: errHistorial } = await supabase.from('canvis_picks').insert({
@@ -189,14 +192,13 @@ export default function Canvis() {
     }
 
     const ordre      = canvisData?.ordre_participants || []
-    const { midaRonda, totalRondes } = obtenirMetadadesSerpentina(ordre)
+    const { midaRonda } = obtenirMetadadesSerpentina(ordre)
     const tornActual = canvisData?.torn_actual ?? 0
     const rondaActual = midaRonda ? Math.floor(tornActual / midaRonda) : 0
     const ordreRondaActual = midaRonda ? ordre.slice(rondaActual * midaRonda, (rondaActual + 1) * midaRonda) : ordre
     const posActual = midaRonda ? tornActual % midaRonda : 0
     const userActual = ordreRondaActual[posActual]
     const esMeuTorn  = userActual === user?.id
-    const nomActual  = participants.find(p => p.id === userActual)?.nom || '...'
     const jaHeCanviat = canvisPicks.some(c => c.torn === tornActual && c.user_id === user?.id)
 
     const pickIds      = new Set(totsElsPicks.map(p => p.player_id))
@@ -204,6 +206,7 @@ export default function Canvis() {
     const meusJugadors = players.filter(p => meusPickIds.has(p.id))
     const disponibles  = players.filter(p => {
         if (pickIds.has(p.id)) return false
+        if (playerOut && p.posicion !== playerOut.posicion) return false
         const okC = cerca === '' || p.nombre.toLowerCase().includes(cerca.toLowerCase()) ||
             (p.equipo_real || '').toLowerCase().includes(cerca.toLowerCase())
         return okC && (posicioFiltro === 'Tots' || p.posicion === posicioFiltro)
@@ -253,7 +256,16 @@ export default function Canvis() {
                                                         <div key={pos}>
                                                             <p className="text-gray-600 text-[10px] uppercase tracking-wider mt-2 mb-1">{pos}s</p>
                                                             {del.map(j => (
-                                                                <button key={j.id} onClick={() => setPlayerOut(playerOut?.id === j.id ? null : j)}
+                                                                <button
+                                                                    key={j.id}
+                                                                    onClick={() => {
+                                                                        const nouOut = playerOut?.id === j.id ? null : j
+                                                                        setPlayerOut(nouOut)
+                                                                        if (nouOut) {
+                                                                            setPosicioFiltro(nouOut.posicion)
+                                                                            if (playerIn && playerIn.posicion !== nouOut.posicion) setPlayerIn(null)
+                                                                        }
+                                                                    }}
                                                                         className={`w-full flex items-center gap-2 p-2.5 rounded-lg border transition mb-1 text-left
                                                                             ${playerOut?.id === j.id ? 'bg-red-900/50 border-red-500 ring-1 ring-red-400' : 'bg-gray-800 border-gray-700 hover:bg-red-900/20 hover:border-red-900'}`}>
                                                                                                             {j.foto
@@ -276,6 +288,7 @@ export default function Canvis() {
                                             <p className="text-white font-semibold mb-3 flex items-center gap-2 flex-wrap">
                                                 <span className="bg-green-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0">2</span>
                                                 Qui <span className="text-green-400 font-bold">entra</span> al teu equip?
+                                                {playerOut && <span className="text-gray-400 text-[11px]">Nomes {playerOut.posicion}</span>}
                                                 {playerIn && <span className="text-green-400 text-xs ml-auto">↓ {playerIn.nombre}</span>}
                                             </p>
                                             <div className="flex gap-1.5 mb-3 flex-wrap">
