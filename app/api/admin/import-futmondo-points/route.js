@@ -11,6 +11,18 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
+async function getActiveJornada(origin) {
+  try {
+    const res = await fetch(`${origin}/api/gameweek-status`, { cache: 'no-store' })
+    const json = await res.json().catch(() => ({}))
+    const activeWeek = Number(json?.activeWeek)
+    if (res.ok && json?.ok && Number.isInteger(activeWeek) && activeWeek > 0) return activeWeek
+  } catch {
+    // fallback abajo
+  }
+  return 1
+}
+
 function stripHtml(html = '') {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -148,8 +160,14 @@ function parseFutbolFantasyRows(html) {
     .filter((row) => row.nom && row.punts !== null)
 }
 
-export async function GET() {
+export async function GET(request) {
   try {
+    const reqUrl = new URL(request.url)
+    const jornadaQuery = Number(reqUrl.searchParams.get('jornada'))
+    const jornada = Number.isInteger(jornadaQuery) && jornadaQuery > 0
+      ? jornadaQuery
+      : await getActiveJornada(reqUrl.origin)
+
     const [pageRes, playersRes] = await Promise.all([
       fetch(FUTBOLFANTASY_URL, {
         cache: 'no-store',
@@ -193,10 +211,45 @@ export async function GET() {
       matchedRows.push({ playerId: player.id, nom: player.nombre, punts: row.punts, source: row.nom })
     }
 
+    const files = Object.entries(puntsMapa).map(([player_id, punts]) => ({
+      player_id: Number(player_id),
+      jornada,
+      punts: Number(punts || 0),
+    }))
+
+    const { error: puntsError } = await supabaseAdmin
+      .from('player_punts')
+      .upsert(files, { onConflict: 'player_id,jornada' })
+
+    if (puntsError) {
+      return Response.json({ ok: false, error: puntsError.message }, { status: 500 })
+    }
+
+    const importedAt = new Date().toISOString()
+    try {
+      const { error: logError } = await supabaseAdmin
+        .from('gameweek_points_import_log')
+        .upsert({
+          jornada,
+          imported_at: importedAt,
+          imported_by: 'import-futmondo',
+          source: 'futbolfantasy',
+        }, { onConflict: 'jornada' })
+
+      if (logError) {
+        console.warn('[import-futmondo-points] No s\'ha pogut registrar la darrera importació:', logError.message)
+      }
+    } catch (logErr) {
+      console.warn('[import-futmondo-points] Error registrant darrera importació:', logErr?.message || logErr)
+    }
+
     return Response.json({
       ok: true,
       source: 'futbolfantasy',
       column: TARGET_COLUMN_LABEL,
+      jornada,
+      importedAt,
+      saved: files.length,
       matched: matchedRows.length,
       totalRows: rows.length,
       totalPlayers: players.length,
@@ -212,6 +265,8 @@ export async function GET() {
     return Response.json({ ok: false, error: error?.message || 'Error important punts Futmondo' }, { status: 500 })
   }
 }
+
+
 
 
 

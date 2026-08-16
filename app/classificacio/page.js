@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import Link from 'next/link'
 import Navbar from '../components/Navbar'
 import BiwengerAvatar from '../components/BiwengerAvatar'
 
@@ -267,6 +266,9 @@ export default function Classificacio() {
     const [ranking, setRanking]                           = useState([])
     const [loading, setLoading]                           = useState(true)
     const [tabActiva, setTabActiva]                       = useState('jornada')
+    const [importantPunts, setImportantPunts]             = useState(false)
+    const [darreraImportacioAt, setDarreraImportacioAt]   = useState(null)
+    const [refreshKey, setRefreshKey]                     = useState(0)
 
     // Jornada actual
     const [jornadaActual, setJornadaActual]               = useState(1)
@@ -290,6 +292,26 @@ export default function Classificacio() {
         { id: 'general',  label: '🏆 Classificació general' },
     ]
 
+    async function importarPuntsJornada() {
+        if (importantPunts) return
+        setImportantPunts(true)
+        try {
+            const res = await fetch('/api/admin/import-futmondo-points', { cache: 'no-store' })
+            const json = await res.json().catch(() => ({}))
+            if (!res.ok || !json?.ok) {
+                alert(json?.error || 'No s\'ha pogut importar els punts')
+                return
+            }
+
+            setDarreraImportacioAt(json.importedAt || null)
+            setRefreshKey((prev) => prev + 1)
+        } catch (error) {
+            alert(error?.message || 'Error important punts')
+        } finally {
+            setImportantPunts(false)
+        }
+    }
+
     useEffect(() => {
         let actiu = true
 
@@ -308,6 +330,26 @@ export default function Classificacio() {
         void syncJornadaActual()
         return () => { actiu = false }
     }, [])
+
+    useEffect(() => {
+        let actiu = true
+
+        async function loadDarreraImportacio() {
+            const jornada = Number(jornadaActual)
+            if (!Number.isInteger(jornada) || jornada <= 0) {
+                setDarreraImportacioAt(null)
+                return
+            }
+
+            const res = await fetch(`/api/admin/gameweek-points?jornada=${jornada}`, { cache: 'no-store' })
+            const json = await res.json().catch(() => ({}))
+            if (!actiu || !res.ok || !json?.ok) return
+            setDarreraImportacioAt(json.lastImportAt || null)
+        }
+
+        void loadDarreraImportacio()
+        return () => { actiu = false }
+    }, [jornadaActual, refreshKey])
 
     // Carrega dades generals (per ranking general)
     useEffect(() => {
@@ -440,7 +482,7 @@ export default function Classificacio() {
         }
         void loadJornada()
         return () => { actiu = false }
-    }, [jornadaSeleccionada, tabActiva])
+    }, [jornadaSeleccionada, tabActiva, refreshKey])
 
     // ── Render ──────────────────────────────────────────────────────
     if (loading) return (
@@ -459,9 +501,20 @@ export default function Classificacio() {
                     {/* Capçalera */}
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-2xl font-bold text-green-400">🏆 Classificació</h1>
-                        <Link href="/draft" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg text-sm transition">
-                            Anar al Draft
-                        </Link>
+                        <div className="flex flex-col items-end gap-1">
+                            <button
+                                onClick={importarPuntsJornada}
+                                disabled={importantPunts}
+                                className="bg-green-500 hover:bg-green-600 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm transition font-semibold"
+                            >
+                                {importantPunts ? 'Important punts...' : '📥 Importar punts'}
+                            </button>
+                            <p className="text-[11px] text-gray-400">
+                                {darreraImportacioAt
+                                    ? `Darrera importació feta: ${formatLockedAt(darreraImportacioAt)}`
+                                    : 'Darrera importació feta: --'}
+                            </p>
+                        </div>
                     </div>
 
                     {/* Botons de tab */}

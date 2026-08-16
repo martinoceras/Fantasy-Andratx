@@ -19,6 +19,46 @@ function parseJornada(value) {
     return Number.isInteger(jornada) && jornada > 0 && jornada <= 38 ? jornada : null
 }
 
+export async function GET(request) {
+    try {
+        const reqUrl = new URL(request.url)
+        const jornada = parseJornada(reqUrl.searchParams.get('jornada'))
+        if (!jornada) {
+            return Response.json({ ok: false, error: 'Jornada invàlida' }, { status: 400 })
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('gameweek_points_import_log')
+            .select('jornada, imported_at, imported_by, source')
+            .eq('jornada', jornada)
+            .maybeSingle()
+
+        if (error) {
+            const msg = String(error.message || '').toLowerCase()
+            if (msg.includes('schema cache') || msg.includes('could not find the table')) {
+                return Response.json({
+                    ok: true,
+                    jornada,
+                    lastImportAt: null,
+                    lastImportBy: null,
+                    source: null,
+                }, { headers: { 'Cache-Control': 'no-store' } })
+            }
+            return Response.json({ ok: false, error: error.message }, { status: 500 })
+        }
+
+        return Response.json({
+            ok: true,
+            jornada,
+            lastImportAt: data?.imported_at || null,
+            lastImportBy: data?.imported_by || null,
+            source: data?.source || null,
+        }, { headers: { 'Cache-Control': 'no-store' } })
+    } catch (error) {
+        return Response.json({ ok: false, error: error?.message || 'Error carregant estat de punts' }, { status: 500 })
+    }
+}
+
 export async function POST(request) {
     try {
         const authHeader = request.headers.get('authorization')
@@ -76,4 +116,6 @@ export async function POST(request) {
         return Response.json({ ok: false, error: error.message || 'Error intern' }, { status: 500 })
     }
 }
+
+
 

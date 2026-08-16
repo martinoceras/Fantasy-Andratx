@@ -561,24 +561,8 @@ export default function Admin() {
             const unmatched = Number(data.unmatched || 0)
             const zeros = Number(data.defaultedToZero || 0)
             setMissatgePunts(
-                `📥 Futmondo importat: ${data.matched || 0} jugadors · Desant a BD...`
+                `✅ Futmondo (Jornada ${data.jornada || jornadaPunts}): ${data.matched || 0} jugadors desats a la BD${data.importedAt ? ` · última importació ${new Intl.DateTimeFormat('ca-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(data.importedAt))}` : ''}${zeros ? ` · ${zeros} amb 0 pts` : ''}${unmatched ? ` · ${unmatched} sense encaix` : ''}`
             )
-
-            // Auto-desar directament a la BD via servidor (bypass RLS)
-            const saveRes = await fetch('/api/admin/save-player-points', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ jornada: jornadaPunts, puntsMapa: mapa }),
-            })
-            const saveData = await saveRes.json().catch(() => ({}))
-
-            if (!saveRes.ok || !saveData?.ok) {
-                setMissatgePunts(`⚠️ Futmondo importat però error desant: ${saveData?.error || 'Error desconegut'}`)
-            } else {
-                setMissatgePunts(
-                    `✅ Futmondo (Jornada ${jornadaPunts}): ${data.matched || 0} jugadors desats a la BD!${zeros ? ` · ${zeros} amb 0 pts` : ''}${unmatched ? ` · ${unmatched} sense encaix` : ''}`
-                )
-            }
         } catch (error) {
             setMissatgePunts(`❌ Error important punts Futmondo: ${error.message}`)
         } finally {
