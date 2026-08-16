@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import Link from 'next/link'
 import Navbar from '../components/Navbar'
+import BiwengerAvatar from '../components/BiwengerAvatar'
 
 const FORMACIONS = {
     '4-4-2':  { Porter: 1, Defensa: 4, Migcampista: 4, Davanter: 2 },
@@ -21,6 +22,29 @@ const POS_COLORS = {
     Davanter:    { bg: 'bg-red-500',    text: 'text-red-900',    border: 'border-red-400'    },
 }
 
+const BANQUETA_SLOTS = {
+    Davanter: 1,
+    Migcampista: 1,
+    Defensa: 1,
+    Porter: 1,
+}
+
+function normalitzarSuplents(suplentsRaw) {
+    if (!suplentsRaw) return {}
+    if (!Array.isArray(suplentsRaw)) return suplentsRaw
+
+    const slots = {}
+    let idx = 0
+    Object.entries(BANQUETA_SLOTS).forEach(([posicio, total]) => {
+        for (let i = 0; i < total; i += 1) {
+            const id = suplentsRaw[idx]
+            if (id) slots[`${posicio}_${i}`] = id
+            idx += 1
+        }
+    })
+    return slots
+}
+
 function nomCurt(nom) {
     if (!nom) return ''
     const parts = nom.trim().split(' ')
@@ -28,22 +52,37 @@ function nomCurt(nom) {
     return cognom.length > 9 ? cognom.slice(0, 9) : cognom
 }
 
+function formatLockedAt(value) {
+    if (!value) return ''
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    return new Intl.DateTimeFormat('ca-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    }).format(date)
+}
+
 function teRegistrePunts(mapaPunts, playerId) {
-    return Object.prototype.hasOwnProperty.call(mapaPunts, playerId)
+    return Object.prototype.hasOwnProperty.call(mapaPunts, String(playerId))
 }
 
 function aplicarSubstitucionsAutomatiques(alineacio = {}, suplents = {}, mapaPunts = {}) {
     const resultat = { ...alineacio }
     const canvis = []
+    const suplentsUsats = new Set()
 
     Object.entries(alineacio || {}).forEach(([slotKey, titularId]) => {
         if (!titularId || teRegistrePunts(mapaPunts, titularId)) return
 
         const [posicio] = slotKey.split('_')
         const suplent1 = suplents?.[`${posicio}_0`]
-        if (!suplent1) return
+        if (!suplent1 || suplentsUsats.has(suplent1)) return
 
         resultat[slotKey] = suplent1
+        suplentsUsats.add(suplent1)
         canvis.push({ slotKey, titularOut: titularId, suplentIn: suplent1 })
     })
 
@@ -65,103 +104,161 @@ function CampEquip({ userId, teamsData, allPlayers, puntsByPlayer }) {
     const team = teamsData.find(t => t.user_id === userId)
     if (!team) return <div className="text-gray-500 text-sm text-center py-10">Sense equip configurat</div>
 
-    const formacio    = team.formacio || '4-4-2'
-    const alineacio   = team.alineacio || {}
+    const formacio    = team.formacio || team.formacioGuardada || '4-4-2'
+    const alineacio   = team.alineacio || team.alineacioGuardada || {}
+    const suplents    = normalitzarSuplents(team.suplents || team.suplentsGuardats || {})
     const formacioObj = FORMACIONS[formacio] || FORMACIONS['4-4-2']
+    const substitutes = Array.isArray(team.substitucions) ? team.substitucions : []
 
-    const titularJugadors = Object.entries(alineacio).map(([key, pid]) => ({
-        key, player: allPlayers.find(p => p.id === pid)
-    })).filter(x => x.player)
+    const getPuntsJugador = (playerId) => Number(puntsByPlayer[String(playerId)] ?? 0)
+
+    function getBanquetaJugador(posicio, index) {
+        const id = suplents[`${posicio}_${index}`]
+        return allPlayers.find((p) => p.id === id) || null
+    }
 
     function renderSlotLlegible(posicio, index) {
         const key      = `${posicio}_${index}`
         const playerId = alineacio[key]
         const jugador  = allPlayers.find(p => p.id === playerId)
         const colors   = POS_COLORS[posicio]
-        const pts      = playerId ? (puntsByPlayer[playerId] ?? null) : null
+        const pts      = playerId ? getPuntsJugador(playerId) : null
 
         return (
-            <div key={key} className="flex flex-col items-center" style={{ width: 56 }}>
-                <div className={`w-12 h-12 rounded-full border-2 flex flex-col items-center justify-center
+            <div key={key} className="flex flex-col items-center" style={{ width: 76 }}>
+                <div className={`w-16 h-16 border-2 relative overflow-hidden
                     ${jugador ? `${colors.bg} ${colors.border}` : 'border-dashed border-white/20 bg-black/20'}`}>
                     {jugador ? (
-                        <>
-                            <span className={`text-[9px] font-bold ${colors.text} leading-tight text-center px-0.5`}>
-                                {nomCurt(jugador.nombre)}
-                            </span>
-                            {pts !== null && (
-                                <span className={`text-[8px] font-bold ${colors.text} opacity-80`}>{pts}p</span>
-                            )}
-                        </>
+                        <BiwengerAvatar
+                            key={`cls_${jugador.id}_${jugador.foto || ''}`}
+                            player={jugador}
+                            alt={jugador.nombre}
+                            className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+                            fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
+                            initialClassName={`text-[10px] font-bold ${colors.text}`}
+                        />
                     ) : (
-                        <span className="text-white/20 text-lg">·</span>
+                        <span className="text-white/20 text-lg absolute inset-0 flex items-center justify-center">+</span>
                     )}
                 </div>
-                <span className="text-white/60 text-[9px] mt-0.5 text-center w-14 truncate">
+                <span className="text-white/90 text-xs mt-1 text-center w-20 truncate font-semibold">
                     {jugador ? nomCurt(jugador.nombre) : ''}
                 </span>
+                {jugador && (
+                    <span className="text-green-400 text-[11px] font-bold mt-0.5 bg-black/35 rounded-full px-1.5 py-[1px]">
+                        {pts} pts
+                    </span>
+                )}
+            </div>
+        )
+    }
+
+    function renderBanquetaSlot(posicio, index) {
+        const jugador = getBanquetaJugador(posicio, index)
+        const colors = POS_COLORS[posicio]
+        const pts = jugador ? getPuntsJugador(jugador.id) : null
+
+        return (
+            <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 82 }}>
+                <div className={`w-16 h-16 border-2 flex items-center justify-center relative transition-all ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'}`}>
+                    {jugador ? (
+                        <BiwengerAvatar
+                            key={`cls_banq_${jugador.id}_${jugador.foto || ''}`}
+                            player={jugador}
+                            alt={jugador.nombre}
+                            className="w-full h-full object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+                            fallbackClassName={`w-full h-full rounded-full flex items-center justify-center ${colors.bg}`}
+                            initialClassName={`text-[10px] font-bold ${colors.text}`}
+                        />
+                    ) : (
+                        <span className="text-white/25 text-base">{index + 1}</span>
+                    )}
+                </div>
+                <span className="text-[10px] text-gray-500 mt-1 font-semibold">{posicio.slice(0, 3).toUpperCase()} · #{index + 1}</span>
+                <span className="text-white text-xs mt-0.5 text-center truncate w-full font-semibold">
+                    {jugador ? nomCurt(jugador.nombre) : '---'}
+                </span>
+                {jugador && <span className="text-green-400 text-[11px] font-bold">{pts} pts</span>}
             </div>
         )
     }
 
     return (
         <div>
-            {/* Camp */}
-            <div className="relative rounded-xl overflow-hidden mb-3"
-                 style={{
-                     width: '100%', maxWidth: 280, margin: '0 auto',
-                     height: 380,
-                     backgroundImage: `repeating-linear-gradient(180deg,rgba(255,255,255,0.04) 0px,rgba(255,255,255,0.04) 40px,transparent 40px,transparent 80px),
-                     linear-gradient(180deg,#1e5c1e 0%,#246b24 14%,#1e5c1e 28%,#246b24 42%,#1e5c1e 56%,#246b24 70%,#1e5c1e 84%,#246b24 100%)`,
-                     border: '2px solid #14401a',
-                     boxShadow: 'inset 0 0 30px rgba(0,0,0,0.4)'
-                 }}>
-                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 280 380" preserveAspectRatio="none">
-                    <rect x="6" y="6" width="268" height="368" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5"/>
-                    <line x1="6" y1="190" x2="274" y2="190" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
-                    <circle cx="140" cy="190" r="35" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
-                </svg>
-                <div className="absolute inset-0 flex flex-col justify-between" style={{ padding: '14px 8px' }}>
-                    <div className="flex justify-around items-center">
-                        {Array.from({ length: formacioObj.Davanter }).map((_, i) => renderSlotLlegible('Davanter', i))}
+            <div className="bg-gray-900/80 border border-gray-700 rounded-xl px-3 py-2 mb-3">
+                <p className="text-[11px] font-semibold text-cyan-300">Titulars guardats per la jornada</p>
+                <p className="text-gray-400 text-[11px] mt-1">
+                    Formació {formacio}
+                    {team.lockedAt && <span className="ml-2 text-gray-500">· Bloquejada {formatLockedAt(team.lockedAt)}</span>}
+                </p>
+                {substitutes.length > 0 && (
+                    <p className="text-amber-300 text-[11px] mt-1">
+                        Substitucions automàtiques aplicades: {substitutes.length}
+                    </p>
+                )}
+            </div>
+
+            <div className="flex gap-4 items-start flex-col xl:flex-row">
+                {/* Camp */}
+                <div className="w-[380px] max-w-full flex-shrink-0">
+                    <div className="relative rounded-xl overflow-hidden"
+                         style={{
+                             width: 380,
+                             maxWidth: '100%',
+                             height: 560,
+                             backgroundImage: `repeating-linear-gradient(180deg,rgba(255,255,255,0.04) 0px,rgba(255,255,255,0.04) 40px,transparent 40px,transparent 80px),
+                             linear-gradient(180deg,#1e5c1e 0%,#246b24 14%,#1e5c1e 28%,#246b24 42%,#1e5c1e 56%,#246b24 70%,#1e5c1e 84%,#246b24 100%)`,
+                             border: '3px solid #14401a',
+                             boxShadow: 'inset 0 0 40px rgba(0,0,0,0.4), 0 4px 20px rgba(0,0,0,0.5)'
+                         }}>
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 320 480" preserveAspectRatio="none">
+                            <rect x="8" y="8" width="304" height="464" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1.5"/>
+                            <line x1="8" y1="240" x2="312" y2="240" stroke="rgba(255,255,255,0.35)" strokeWidth="1"/>
+                            <circle cx="160" cy="240" r="40" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1"/>
+                            <circle cx="160" cy="240" r="2" fill="rgba(255,255,255,0.5)"/>
+                            <rect x="60" y="8" width="200" height="65" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
+                            <rect x="100" y="8" width="120" height="28" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
+                            <rect x="60" y="407" width="200" height="65" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
+                            <rect x="100" y="444" width="120" height="28" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
+                            <rect x="120" y="2" width="80" height="10" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5"/>
+                            <rect x="120" y="468" width="80" height="10" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5"/>
+                            <circle cx="160" cy="55" r="2.5" fill="rgba(255,255,255,0.4)"/>
+                            <circle cx="160" cy="425" r="2.5" fill="rgba(255,255,255,0.4)"/>
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col justify-between" style={{ padding: '24px 18px' }}>
+                            <div className="flex justify-around items-center">
+                                {Array.from({ length: formacioObj.Davanter }).map((_, i) => renderSlotLlegible('Davanter', i))}
+                            </div>
+                            <div className="flex justify-around items-center">
+                                {Array.from({ length: formacioObj.Migcampista }).map((_, i) => renderSlotLlegible('Migcampista', i))}
+                            </div>
+                            <div className="flex justify-around items-center">
+                                {Array.from({ length: formacioObj.Defensa }).map((_, i) => renderSlotLlegible('Defensa', i))}
+                            </div>
+                            <div className="flex justify-around items-center">
+                                {Array.from({ length: formacioObj.Porter }).map((_, i) => renderSlotLlegible('Porter', i))}
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex justify-around items-center">
-                        {Array.from({ length: formacioObj.Migcampista }).map((_, i) => renderSlotLlegible('Migcampista', i))}
-                    </div>
-                    <div className="flex justify-around items-center">
-                        {Array.from({ length: formacioObj.Defensa }).map((_, i) => renderSlotLlegible('Defensa', i))}
-                    </div>
-                    <div className="flex justify-around items-center">
-                        {Array.from({ length: formacioObj.Porter }).map((_, i) => renderSlotLlegible('Porter', i))}
+                </div>
+
+                {/* Banqueta */}
+                <div className="w-[430px] max-w-full flex-shrink-0 min-w-0">
+                    <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 overflow-y-auto" style={{ maxHeight: 560 }}>
+                        <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">
+                            Banqueta ({Object.values(suplents).filter(Boolean).length})
+                        </p>
+                        {Object.entries(BANQUETA_SLOTS).map(([posicio, totalSlots]) => (
+                            <div key={posicio} className="mb-3 last:mb-0">
+                                <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold mb-2">{posicio}</p>
+                                <div className="flex gap-3 flex-wrap justify-center w-full">
+                                    {Array.from({ length: totalSlots }).map((_, index) => renderBanquetaSlot(posicio, index))}
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
-
-            {/* Llista titulars amb punts */}
-            {titularJugadors.length > 0 && (
-                <div className="bg-gray-900/80 border border-gray-700 rounded-xl p-2">
-                    <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-1.5 font-semibold">
-                        Formació: {formacio}
-                    </p>
-                    <div className="grid grid-cols-2 gap-1">
-                        {titularJugadors.map(({ key, player }) => {
-                            const colors = POS_COLORS[player.posicion]
-                            const pts    = puntsByPlayer[player.id] ?? null
-                            return (
-                                <div key={key} className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-2 py-1">
-                                    <span className={`text-[8px] font-bold px-1 py-0.5 rounded-full ${colors.bg} ${colors.text}`}>
-                                        {player.posicion.slice(0, 3).toUpperCase()}
-                                    </span>
-                                    <span className="text-white text-[10px] flex-1 truncate">{player.nombre}</span>
-                                    {pts !== null && (
-                                        <span className="text-green-400 text-[10px] font-bold">{pts}p</span>
-                                    )}
-                                </div>
-                            )
-                        })}
-                    </div>
-                </div>
-            )}
         </div>
     )
 }
@@ -195,6 +292,7 @@ export default function Classificacio() {
 
     useEffect(() => {
         let actiu = true
+
         async function syncJornadaActual() {
             const estat = await fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
             if (!actiu || !estat?.ok) return
@@ -214,29 +312,42 @@ export default function Classificacio() {
     // Carrega dades generals (per ranking general)
     useEffect(() => {
         let actiu = true
-        async function loadRanking() {
-            const [{ data: punts }, { data: teams }, { data: perfils }] = await Promise.all([
-                supabase.from('player_punts').select('player_id, punts'),
-                supabase.from('teams').select('user_id, alineacio'),
-                supabase.from('profiles').select('id, nom, email'),
-            ])
-            if (!actiu) return
-            const puntsMapa = {}
-            punts?.forEach(p => { puntsMapa[p.player_id] = (puntsMapa[p.player_id] || 0) + Number(p.punts) })
 
-            const llista = (perfils || []).map(perfil => {
-                const team = teams?.find(t => t.user_id === perfil.id)
-                const alineacio = team?.alineacio || {}
-                const total = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
-                return {
-                    userId: perfil.id,
-                    total,
-                    nom: perfil.nom || perfil.email || perfil.id.slice(0, 8) + '...'
-                }
-            }).sort((a, b) => b.total - a.total)
-            setRanking(llista)
-            setLoading(false)
+        async function loadRanking() {
+            try {
+                const [{ data: punts }, { data: teams }, { data: perfils }, { data: picks }] = await Promise.all([
+                    supabase.from('player_punts').select('player_id, punts'),
+                    supabase.from('teams').select('user_id, alineacio'),
+                    supabase.from('profiles').select('id, nom, email'),
+                    supabase.from('draft_picks').select('user_id'),
+                ])
+                if (!actiu) return
+
+                const draftedUserIds = new Set((picks || []).map((pick) => pick?.user_id).filter(Boolean))
+                const perfilsDraft = (perfils || []).filter((perfil) => draftedUserIds.has(perfil.id))
+                const puntsMapa = {}
+                punts?.forEach((p) => {
+                    const key = String(p.player_id)
+                    puntsMapa[key] = (puntsMapa[key] || 0) + Number(p.punts || 0)
+                })
+
+                const llista = perfilsDraft.map((perfil) => {
+                    const team = teams?.find(t => t.user_id === perfil.id)
+                    const alineacio = team?.alineacio || {}
+                    const total = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
+                    return {
+                        userId: perfil.id,
+                        total,
+                        nom: perfil.nom || perfil.email || `${perfil.id.slice(0, 8)}...`,
+                    }
+                }).sort((a, b) => b.total - a.total)
+
+                setRanking(llista)
+            } finally {
+                if (actiu) setLoading(false)
+            }
         }
+
         void loadRanking()
         return () => { actiu = false }
     }, [])
@@ -245,66 +356,27 @@ export default function Classificacio() {
     useEffect(() => {
         if (tabActiva !== 'jornada') return
         let actiu = true
+
         async function loadActual() {
             setCarregantActual(true)
-            const [
-                { data: punts },
-                { data: teams },
-                { data: perfils },
-                { data: playersAll },
-                { data: snapshots },
-                estatJornadaRes,
-            ] = await Promise.all([
-                supabase.from('player_punts').select('player_id, punts').eq('jornada', jornadaActual),
-                supabase.from('teams').select('user_id, alineacio, suplents, formacio'),
-                supabase.from('profiles').select('id, nom, email'),
-                supabase.from('players').select('*'),
-                supabase.from('gameweek_lineups').select('user_id, jornada, alineacio, suplents, formacio').eq('jornada', jornadaActual),
-                fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({})),
-            ])
-            if (!actiu) return
+            const res = await fetch(`/api/classificacio/jornada?jornada=${jornadaActual}`, { cache: 'no-store' })
+            const json = await res.json().catch(() => ({}))
 
-            setAllPlayers((playersAll || []).map(p => ({
-                ...p,
-                equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
-            })))
-            const mapa = {}
-            punts?.forEach(p => { mapa[p.player_id] = Number(p.punts) })
-            setPuntsByPlayer(mapa)
+            if (!actiu || !res.ok || !json?.ok) {
+                setCarregantActual(false)
+                return
+            }
 
-            const substitutionsActives = potAplicarBanqueta({
-                jornada: jornadaActual,
-                estatJornada: estatJornadaRes,
-                tePuntsOficials: (punts || []).length > 0,
-            })
+            setRankingJornadaActual(json.rankingJornadaActual || [])
+            setTeamsData(json.teamsData || [])
+            setAllPlayers(json.allPlayers || [])
+            setPuntsByPlayer(json.puntsByPlayer || {})
 
-            const snapshotByUser = new Map((snapshots || []).map(s => [s.user_id, s]))
-            const teamsAplicats = (teams || []).map((team) => {
-                const snap = snapshotByUser.get(team.user_id)
-                const alineacioBase = snap?.alineacio || team.alineacio || {}
-                const suplentsBase = snap?.suplents || team.suplents || {}
-                const { alineacioFinal } = substitutionsActives
-                    ? aplicarSubstitucionsAutomatiques(alineacioBase, suplentsBase, mapa)
-                    : { alineacioFinal: alineacioBase }
-                return {
-                    ...team,
-                    alineacio: alineacioFinal,
-                    formacio: snap?.formacio || team.formacio,
-                }
-            })
-            setTeamsData(teamsAplicats)
-
-            const calc = (perfils || []).map(perfil => {
-                const team = teamsAplicats.find(t => t.user_id === perfil.id)
-                const alineacio = team?.alineacio || {}
-                const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (mapa[pid] || 0), 0)
-                return { userId: perfil.id, nom: perfil.nom || perfil.email || '...', punts: totalPunts }
-            }).sort((a, b) => b.punts - a.punts)
-
-            setRankingJornadaActual(calc)
-            if (calc.length > 0) setParticipantSel(sel => sel ?? calc[0].userId)
+            const selected = json.participantSel || json.rankingJornadaActual?.[0]?.userId || null
+            setParticipantSel(selected)
             setCarregantActual(false)
         }
+
         void loadActual()
         return () => { actiu = false }
     }, [tabActiva, jornadaActual])
@@ -321,17 +393,24 @@ export default function Classificacio() {
                 { data: teams },
                 { data: perfils },
                 { data: snapshots },
+                { data: picks },
                 estatJornadaRes,
             ] = await Promise.all([
                 supabase.from('player_punts').select('player_id, punts').eq('jornada', jornadaSeleccionada),
                 supabase.from('teams').select('user_id, alineacio, suplents'),
                 supabase.from('profiles').select('id, nom, email'),
                 supabase.from('gameweek_lineups').select('user_id, jornada, alineacio, suplents').eq('jornada', jornadaSeleccionada),
+                supabase.from('draft_picks').select('user_id'),
                 fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({})),
             ])
             if (!actiu) return
+            const draftedUserIds = new Set((picks || []).map((pick) => pick?.user_id).filter(Boolean))
+            const perfilsDraft = (perfils || []).filter((perfil) => draftedUserIds.has(perfil.id))
             const puntsMapa = {}
-            punts?.forEach(p => { puntsMapa[p.player_id] = Number(p.punts) })
+            punts?.forEach((p) => {
+                const key = String(p.player_id)
+                puntsMapa[key] = (puntsMapa[key] || 0) + Number(p.punts || 0)
+            })
 
             const substitutionsActives = potAplicarBanqueta({
                 jornada: jornadaSeleccionada,
@@ -340,7 +419,7 @@ export default function Classificacio() {
             })
 
             const snapshotByUser = new Map((snapshots || []).map(s => [s.user_id, s]))
-            const teamsAplicats = (teams || []).map((team) => {
+            const teamsAplicats = (teams || []).filter((team) => draftedUserIds.has(team.user_id)).map((team) => {
                 const snap = snapshotByUser.get(team.user_id)
                 const alineacioBase = snap?.alineacio || team.alineacio || {}
                 const suplentsBase = snap?.suplents || team.suplents || {}
@@ -350,7 +429,7 @@ export default function Classificacio() {
                 return { ...team, alineacio: alineacioFinal }
             })
 
-            const rankingCalculat = (perfils || []).map(perfil => {
+            const rankingCalculat = perfilsDraft.map(perfil => {
                 const team = teamsAplicats.find(t => t.user_id === perfil.id)
                 const alineacio = team?.alineacio || {}
                 const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
@@ -458,7 +537,7 @@ export default function Classificacio() {
                                             </>
                                         ) : (
                                             <p className="text-gray-600 text-sm text-center py-12">
-                                                Selecciona un participant per veure el seu equip
+                                                Carregant equip titular i reserves...
                                             </p>
                                         )}
                                     </div>

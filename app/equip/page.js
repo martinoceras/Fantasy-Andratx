@@ -93,6 +93,42 @@ export default function Equip() {
         return { dies, hores, minuts, segons, acabat: totalSeconds <= 0 }
     }
 
+    async function carregarTeamServidor(userId) {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const token = sessionData?.session?.access_token
+        const headers = {}
+        if (token) headers.Authorization = `Bearer ${token}`
+
+        const params = new URLSearchParams({ temporada: TEMPORADA })
+        const res = await fetch(`/api/team/get?${params.toString()}`, {
+            method: 'GET',
+            headers,
+            cache: 'no-store',
+        })
+
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || !json?.ok) return null
+        if (!json.team) return null
+        if (json.team.user_id && json.team.user_id !== userId) return null
+        return json.team
+    }
+
+    async function desarTeamServidor(payload) {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const token = sessionData?.session?.access_token
+        const headers = { 'Content-Type': 'application/json' }
+        if (token) headers.Authorization = `Bearer ${token}`
+
+        const res = await fetch('/api/team/save', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok || !json?.ok) return null
+        return json.team || null
+    }
+
     async function carregarCalendari(jornada) {
         setCalendariLoading(true)
         setCalendariError('')
@@ -130,7 +166,7 @@ export default function Equip() {
                 ...p,
                 equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
             })))
-            const { data: teamData } = await supabase.from('teams').select('*').eq('user_id', userId).single()
+            const teamData = await carregarTeamServidor(userId)
             const formacioActual = teamData?.formacio || '4-4-2'
             const titularsActuals = teamData?.alineacio || {}
             const suplentsActuals = normalitzarSuplents(teamData?.suplents)
@@ -149,12 +185,8 @@ export default function Equip() {
                     alineacio: nousTitulars,
                     suplents: nousSuplents,
                 }
-                if (teamData) {
-                    await supabase.from('teams').update(payload).eq('user_id', userId)
-                } else {
-                    const { data: nouTeam } = await supabase.from('teams').insert(payload).select().single()
-                    if (nouTeam) setTeam(nouTeam)
-                }
+                const nouTeam = await desarTeamServidor(payload)
+                if (nouTeam) setTeam(nouTeam)
             }
 
             setLoading(false)
@@ -163,7 +195,7 @@ export default function Equip() {
         setJugadors([])
         setTitulars({})
         setSuplents({})
-        const { data: teamData } = await supabase.from('teams').select('*').eq('user_id', userId).single()
+        const teamData = await carregarTeamServidor(userId)
         if (teamData) {
             setTeam(teamData)
             setFormacio(teamData.formacio || '4-4-2')
@@ -279,12 +311,8 @@ export default function Equip() {
             alineacio: nousTitulars ?? titulars,
             suplents: nousSuplents ?? suplents,
         }
-        if (team) {
-            await supabase.from('teams').update(payload).eq('user_id', user.id)
-        } else {
-            const { data: nouTeam } = await supabase.from('teams').insert(payload).select().single()
-            if (nouTeam) setTeam(nouTeam)
-        }
+        const nouTeam = await desarTeamServidor(payload)
+        if (nouTeam) setTeam(nouTeam)
         setTimeout(() => setDesant(false), 800)
     }
 

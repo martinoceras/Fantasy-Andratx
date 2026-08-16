@@ -40,6 +40,7 @@ export default function Admin() {
     const [players, setPlayers] = useState([])
     const [puntsMapa, setPuntsMapa] = useState({})
     const [desantPunts, setDesantPunts] = useState(false)
+    const [importantFutmondo, setImportantFutmondo] = useState(false)
     const [missatgePunts, setMissatgePunts] = useState('')
 
     // Secció sync jugadors
@@ -519,20 +520,71 @@ export default function Admin() {
         setTimeout(() => setMissatgeSync(''), 6000)
     }
 
-    async function desarPuntsJornada() {
+    async function desarPuntsJornada(mapaOverride, jornadaOverride) {
         setDesantPunts(true)
         setMissatgePunts('')
-        const files = Object.entries(puntsMapa)
-            .filter(([, v]) => v !== '' && v !== undefined && v !== null)
-            .map(([player_id, punts]) => ({
-                player_id: Number(player_id),
-                jornada: jornadaPunts,
-                punts: Number(punts)
-            }))
-        const { error } = await supabase.from('player_punts').upsert(files, { onConflict: 'player_id,jornada' })
+        const mapaFinal = mapaOverride ?? puntsMapa
+        const jornadaFinal = jornadaOverride ?? jornadaPunts
+        try {
+            const res = await fetch('/api/admin/save-player-points', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jornada: jornadaFinal, puntsMapa: mapaFinal }),
+            })
+            const data = await res.json().catch(() => ({}))
+            setMissatgePunts(
+                !res.ok || !data?.ok
+                    ? `❌ Error desant punts: ${data?.error || 'Error desconegut'}`
+                    : `✓ ${data.saved} punts jornada ${jornadaFinal} desats a la BD!`
+            )
+        } catch (e) {
+            setMissatgePunts(`❌ Error de connexió: ${e.message}`)
+        }
         setDesantPunts(false)
-        setMissatgePunts(error ? '❌ Error: ' + error.message : `✓ Punts jornada ${jornadaPunts} desats!`)
-        setTimeout(() => setMissatgePunts(''), 4000)
+        setTimeout(() => setMissatgePunts(''), 5000)
+    }
+
+    async function importarPuntsFutmondo() {
+        setImportantFutmondo(true)
+        setMissatgePunts('')
+        try {
+            const res = await fetch('/api/admin/import-futmondo-points', { cache: 'no-store' })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok || !data?.ok) {
+                setMissatgePunts(`❌ Error important punts Futmondo: ${data?.error || 'Resposta invàlida'}`)
+                return
+            }
+
+            const mapa = data.puntsMapa || {}
+            setPuntsMapa(mapa)
+
+            const unmatched = Number(data.unmatched || 0)
+            const zeros = Number(data.defaultedToZero || 0)
+            setMissatgePunts(
+                `📥 Futmondo importat: ${data.matched || 0} jugadors · Desant a BD...`
+            )
+
+            // Auto-desar directament a la BD via servidor (bypass RLS)
+            const saveRes = await fetch('/api/admin/save-player-points', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jornada: jornadaPunts, puntsMapa: mapa }),
+            })
+            const saveData = await saveRes.json().catch(() => ({}))
+
+            if (!saveRes.ok || !saveData?.ok) {
+                setMissatgePunts(`⚠️ Futmondo importat però error desant: ${saveData?.error || 'Error desconegut'}`)
+            } else {
+                setMissatgePunts(
+                    `✅ Futmondo (Jornada ${jornadaPunts}): ${data.matched || 0} jugadors desats a la BD!${zeros ? ` · ${zeros} amb 0 pts` : ''}${unmatched ? ` · ${unmatched} sense encaix` : ''}`
+                )
+            }
+        } catch (error) {
+            setMissatgePunts(`❌ Error important punts Futmondo: ${error.message}`)
+        } finally {
+            setImportantFutmondo(false)
+            setTimeout(() => setMissatgePunts(''), 8000)
+        }
     }
 
     async function iniciarRondaCanvis() {
@@ -1132,7 +1184,19 @@ export default function Admin() {
                         )}
 
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
-                            <p className="text-white font-semibold mb-4">Punts Jornada {jornadaPunts}</p>
+                            <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                                <div>
+                                    <p className="text-white font-semibold">Punts Jornada {jornadaPunts}</p>
+                                    <p className="text-gray-500 text-xs mt-1">Pots omplir manualment o carregar els valors de Futmondo (Prensa) al panell.</p>
+                                </div>
+                                <button
+                                    onClick={importarPuntsFutmondo}
+                                    disabled={importantFutmondo || desantPunts}
+                                    className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+                                >
+                                    {importantFutmondo ? 'Important Futmondo...' : '📥 Importar Futmondo (Prensa)'}
+                                </button>
+                            </div>
                             {players.length === 0 ? (
                                 <p className="text-gray-500 text-sm">No hi ha jugadors carregats.</p>
                             ) : (
