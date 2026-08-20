@@ -31,8 +31,42 @@ function normalitzarObjecte(data) {
     )
 }
 
+async function mirrorToActiveGameweek({ origin, payload }) {
+    if (!origin) return
+
+    try {
+        const statusRes = await fetch(`${origin}/api/gameweek-status`, { cache: 'no-store' })
+        const statusJson = await statusRes.json().catch(() => ({}))
+        if (!statusRes.ok || !statusJson?.ok) return
+
+        const activeWeek = Number(statusJson.activeWeek)
+        const lockEditing = statusJson.lockEditing === true
+        if (!Number.isInteger(activeWeek) || activeWeek <= 0 || lockEditing) return
+
+        const snapshotPayload = {
+            user_id: payload.user_id,
+            jornada: activeWeek,
+            alineacio: payload.alineacio,
+            suplents: payload.suplents,
+            formacio: payload.formacio,
+            locked_at: new Date().toISOString(),
+        }
+
+        const { error } = await supabaseAdmin
+            .from('gameweek_lineups')
+            .upsert(snapshotPayload, { onConflict: 'user_id,jornada' })
+
+        if (error) {
+            console.warn('[team/save] No s\'ha pogut mirroritzar a gameweek_lineups:', error.message)
+        }
+    } catch (error) {
+        console.warn('[team/save] Error mirroritzant a gameweek_lineups:', error?.message || error)
+    }
+}
+
 export async function POST(request) {
     try {
+        const reqUrl = new URL(request.url)
         const authHeader = request.headers.get('authorization')
         const supabaseUser = createUserClient(authHeader)
         const { data: userData } = await supabaseUser.auth.getUser()
@@ -75,6 +109,8 @@ export async function POST(request) {
                 return Response.json({ ok: false, error: errUpdate.message }, { status: 500 })
             }
 
+            await mirrorToActiveGameweek({ origin: reqUrl.origin, payload })
+
             return Response.json({ ok: true, team: updated?.[0] || payload })
         }
 
@@ -88,9 +124,12 @@ export async function POST(request) {
             return Response.json({ ok: false, error: errInsert.message }, { status: 500 })
         }
 
+        await mirrorToActiveGameweek({ origin: reqUrl.origin, payload })
+
         return Response.json({ ok: true, team: inserted?.[0] || payload })
     } catch (error) {
         return Response.json({ ok: false, error: error?.message || 'Error desant equip' }, { status: 500 })
     }
 }
+
 

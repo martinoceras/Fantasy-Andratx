@@ -35,6 +35,12 @@ export default function Admin() {
     const [nomEditat, setNomEditat] = useState('')
     const [desantEdicioUsuari, setDesantEdicioUsuari] = useState(false)
 
+    // Reset contrasenya
+    const [usuariResetant, setUsuariResetant] = useState(null)
+    const [novaContrasenya, setNovaContrasenya] = useState('')
+    const [resetantContrasenya, setResetantContrasenya] = useState(false)
+    const [missatgeReset, setMissatgeReset] = useState('')
+
     // Secció punts — TOTS els hooks han d'estar aquí dalt
     const [jornadaPunts, setJornadaPunts] = useState(1)
     const [players, setPlayers] = useState([])
@@ -430,6 +436,46 @@ export default function Admin() {
         setNomEditat('')
     }
 
+    function obrirModalResetContrasenya(userObj) {
+        setUsuariResetant(userObj)
+        setNovaContrasenya('')
+        setMissatgeReset('')
+    }
+
+    function tancarModalResetContrasenya() {
+        if (resetantContrasenya) return
+        setUsuariResetant(null)
+        setNovaContrasenya('')
+        setMissatgeReset('')
+    }
+
+    async function guardarNovaContrasenya() {
+        if (!usuariResetant?.id) return
+        if (novaContrasenya.length < 6) {
+            setMissatgeReset('❌ La contrasenya ha de tenir almenys 6 caràcters')
+            return
+        }
+        setResetantContrasenya(true)
+        setMissatgeReset('')
+        try {
+            const res = await fetch('/api/admin/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: usuariResetant.id, novaContrasenya }),
+            })
+            const data = await res.json()
+            if (!res.ok || data.error) {
+                setMissatgeReset('❌ Error: ' + (data.error || 'No s\'ha pogut canviar la contrasenya'))
+            } else {
+                setMissatgeReset('✅ Contrasenya canviada correctament!')
+                setTimeout(() => tancarModalResetContrasenya(), 2000)
+            }
+        } catch (e) {
+            setMissatgeReset('❌ Error: ' + e.message)
+        }
+        setResetantContrasenya(false)
+    }
+
     async function guardarEdicioUsuari() {
         if (!usuariEditant?.id) return
         const nom = nomEditat.trim()
@@ -556,7 +602,12 @@ export default function Admin() {
             }
 
             const mapa = data.puntsMapa || {}
+            const jornadaImportada = Number(data.jornada) || jornadaPunts
             setPuntsMapa(mapa)
+            if (jornadaImportada !== jornadaPunts) setJornadaPunts(jornadaImportada)
+
+            // Recarrega des de BD per mostrar l'estat real persistit després de l'upsert.
+            await carregarPuntsJornada(jornadaImportada)
 
             const unmatched = Number(data.unmatched || 0)
             const zeros = Number(data.defaultedToZero || 0)
@@ -1096,16 +1147,21 @@ export default function Admin() {
                                             <p className="text-gray-400 text-xs">{p.email}</p>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => obrirModalEdicioUsuari(p)}
-                                                disabled={editantUsuariId === p.id}
-                                                className="text-blue-400 hover:text-blue-300 text-sm px-3 py-1 rounded border border-blue-800 hover:border-blue-600 transition disabled:opacity-50">
-                                                {editantUsuariId === p.id ? 'Editant...' : 'Editar'}
-                                            </button>
-                                            <button onClick={() => eliminarUsuari(p.id, p.email)} className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded border border-red-800 hover:border-red-600 transition">
-                                                Eliminar
-                                            </button>
-                                        </div>
+                                             <button
+                                                 onClick={() => obrirModalEdicioUsuari(p)}
+                                                 disabled={editantUsuariId === p.id}
+                                                 className="text-blue-400 hover:text-blue-300 text-sm px-3 py-1 rounded border border-blue-800 hover:border-blue-600 transition disabled:opacity-50">
+                                                 {editantUsuariId === p.id ? 'Editant...' : 'Editar'}
+                                             </button>
+                                             <button
+                                                 onClick={() => obrirModalResetContrasenya(p)}
+                                                 className="text-yellow-400 hover:text-yellow-300 text-sm px-3 py-1 rounded border border-yellow-800 hover:border-yellow-600 transition">
+                                                 🔑 Contrasenya
+                                             </button>
+                                             <button onClick={() => eliminarUsuari(p.id, p.email)} className="text-red-400 hover:text-red-300 text-sm px-3 py-1 rounded border border-red-800 hover:border-red-600 transition">
+                                                 Eliminar
+                                             </button>
+                                         </div>
                                     </div>
                                 ))}
                             </div>
@@ -1139,6 +1195,49 @@ export default function Admin() {
                                             disabled={desantEdicioUsuari}
                                             className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded-lg font-semibold transition">
                                             {desantEdicioUsuari ? 'Desant...' : 'Desar'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Modal reset contrasenya */}
+                        {usuariResetant && (
+                            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                                <div className="bg-gray-900 border border-yellow-700/50 rounded-2xl p-6 w-full max-w-md">
+                                    <h3 className="text-white font-bold text-lg mb-1">🔑 Nova contrasenya</h3>
+                                    <p className="text-gray-400 text-sm mb-1">{usuariResetant.nom || usuariResetant.email}</p>
+                                    <p className="text-gray-500 text-xs mb-4">{usuariResetant.email}</p>
+
+                                    <label className="text-gray-400 text-sm block mb-1">Nova contrasenya (mínim 6 caràcters)</label>
+                                    <input
+                                        type="text"
+                                        value={novaContrasenya}
+                                        onChange={e => setNovaContrasenya(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && !resetantContrasenya && guardarNovaContrasenya()}
+                                        placeholder="Escriu la nova contrasenya..."
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500 mb-4 font-mono"
+                                        autoFocus
+                                    />
+
+                                    {missatgeReset && (
+                                        <div className={`border px-3 py-2 rounded-lg mb-4 text-sm ${missatgeReset.includes('❌') ? 'bg-red-900 border-red-500 text-red-300' : 'bg-green-900 border-green-500 text-green-300'}`}>
+                                            {missatgeReset}
+                                        </div>
+                                    )}
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={tancarModalResetContrasenya}
+                                            disabled={resetantContrasenya}
+                                            className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white py-2 rounded-lg transition">
+                                            Cancel·lar
+                                        </button>
+                                        <button
+                                            onClick={guardarNovaContrasenya}
+                                            disabled={resetantContrasenya || novaContrasenya.length < 6}
+                                            className="flex-1 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white py-2 rounded-lg font-semibold transition">
+                                            {resetantContrasenya ? 'Canviant...' : '🔑 Canviar contrasenya'}
                                         </button>
                                     </div>
                                 </div>

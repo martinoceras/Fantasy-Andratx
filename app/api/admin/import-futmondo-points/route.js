@@ -211,11 +211,31 @@ export async function GET(request) {
       matchedRows.push({ playerId: player.id, nom: player.nombre, punts: row.punts, source: row.nom })
     }
 
-    const files = Object.entries(puntsMapa).map(([player_id, punts]) => ({
-      player_id: Number(player_id),
-      jornada,
-      punts: Number(punts || 0),
-    }))
+    // FutbolFantasy exposa punts acumulats de temporada. Per guardar punts de jornada,
+    // restem el que el jugador ja portava acumulat fins la jornada anterior.
+    const acumulatAnteriorPerPlayer = {}
+    if (jornada > 1) {
+      const { data: puntsAnteriors } = await supabaseAdmin
+        .from('player_punts')
+        .select('player_id, punts')
+        .lt('jornada', jornada)
+
+      ;(puntsAnteriors || []).forEach((row) => {
+        const key = String(row.player_id)
+        acumulatAnteriorPerPlayer[key] = Number(acumulatAnteriorPerPlayer[key] || 0) + Number(row.punts || 0)
+      })
+    }
+
+    const files = Object.entries(puntsMapa).map(([player_id, puntsAcumulats]) => {
+      const key = String(player_id)
+      const acumulatAnterior = Number(acumulatAnteriorPerPlayer[key] || 0)
+      const puntsJornada = Number(puntsAcumulats || 0) - acumulatAnterior
+      return {
+        player_id: Number(player_id),
+        jornada,
+        punts: Number.isFinite(puntsJornada) ? puntsJornada : 0,
+      }
+    })
 
     const { error: puntsError } = await supabaseAdmin
       .from('player_punts')
@@ -265,6 +285,7 @@ export async function GET(request) {
     return Response.json({ ok: false, error: error?.message || 'Error important punts Futmondo' }, { status: 500 })
   }
 }
+
 
 
 

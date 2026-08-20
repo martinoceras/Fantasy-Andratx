@@ -59,6 +59,41 @@ function isEmptyObject(value) {
     return !value || typeof value !== 'object' || Object.keys(value).length === 0
 }
 
+function sumPreviousPoints(rows = []) {
+    const map = {}
+    for (const row of rows || []) {
+        const key = String(row?.player_id)
+        map[key] = Number(map[key] || 0) + Number(row?.punts || 0)
+    }
+    return map
+}
+
+function shouldNormalizeAccumulatedRows(rows = [], previousAccumMap = {}) {
+    let compared = 0
+    let previousPositive = 0
+    let nonDecreasing = 0
+    let equalToPrevious = 0
+
+    for (const row of rows || []) {
+        const key = String(row?.player_id)
+        const current = Number(row?.punts || 0)
+        const previous = Number(previousAccumMap[key] || 0)
+
+        if (previous > 0) previousPositive += 1
+        if (previous <= 0 && current <= 0) continue
+
+        compared += 1
+        if (current >= previous) nonDecreasing += 1
+        if (current === previous) equalToPrevious += 1
+    }
+
+    if (compared === 0 || previousPositive === 0) return false
+
+    const nonDecreasingRatio = nonDecreasing / compared
+    const equalRatio = equalToPrevious / compared
+    return nonDecreasingRatio >= 0.85 && equalRatio >= 0.35
+}
+
 /**
  * Genera alineació automàtica des de la llista de jugadors de l'usuari.
  * Usa el mateix algoritme i ordre que autoOmplirPlantilla a equip/page.js:
@@ -114,27 +149,62 @@ export async function GET(request) {
         // Llegim totes les dades en paral·lel. Picks ordenats per torn per consistència.
         const [
             { data: punts },
+            { data: puntsAnteriors },
             { data: teams },
             { data: perfils },
             { data: players },
             { data: snapshots },
             { data: picks },
-            { data: estatJornada },
+            estatJornada,          // fetch result directe, NO és Supabase → no destructurar { data }
+            importLogRes,
         ] = await Promise.all([
             supabaseAdmin.from('player_punts').select('player_id, punts').eq('jornada', jornada),
+            supabaseAdmin.from('player_punts').select('player_id, punts').lt('jornada', jornada),
             supabaseAdmin.from('teams').select('user_id, alineacio, suplents, formacio, temporada'),
             supabaseAdmin.from('profiles').select('id, nom, email'),
             supabaseAdmin.from('players').select('*').order('id', { ascending: true }),
             supabaseAdmin.from('gameweek_lineups').select('user_id, jornada, alineacio, suplents, formacio, locked_at').eq('jornada', jornada),
             supabaseAdmin.from('draft_picks').select('user_id, player_id, torn').order('torn', { ascending: true }),
             fetch(`${reqUrl.origin}/api/gameweek-status`, { cache: 'no-store' }).then(r => r.json()).catch(() => ({})),
+            supabaseAdmin
+                .from('gameweek_points_import_log')
+                .select('jornada')
+                .eq('jornada', jornada)
+                .maybeSingle(),
         ])
+
+        const activeWeekNum = Number(estatJornada?.activeWeek)
+        const isActiveJornada = Number.isInteger(activeWeekNum) && activeWeekNum === jornada
+        const noImportLogForWeek = Boolean(importLogRes?.error) || !importLogRes?.data
+        const shouldResetActiveWeekPoints =
+            isActiveJornada &&
+            estatJornada?.mode !== 'season_finished' &&
+            noImportLogForWeek
+
+        const previousAccumMap = sumPreviousPoints(puntsAnteriors || [])
+        const puntsCrus = shouldResetActiveWeekPoints ? [] : (punts || [])
+        const normalizeAccumulated =
+            !shouldResetActiveWeekPoints &&
+            jornada > 1 &&
+            shouldNormalizeAccumulatedRows(puntsCrus, previousAccumMap)
+
+        const puntsJornada = normalizeAccumulated
+            ? puntsCrus.map((row) => {
+                const key = String(row.player_id)
+                const previous = Number(previousAccumMap[key] || 0)
+                const current = Number(row.punts || 0)
+                return {
+                    ...row,
+                    punts: Math.max(0, current - previous),
+                }
+            })
+            : puntsCrus
 
         // Mapa de punts per jornada
         const puntsMapa = {}
-        ;(punts || []).forEach((p) => {
+        ;(puntsJornada || []).forEach((p) => {
             const key = String(p.player_id)
-            puntsMapa[key] = (puntsMapa[key] || 0) + Number(p.punts || 0)
+            puntsMapa[key] = Number(p.punts || 0)
         })
 
         // Index de jugadors i de snapshots
@@ -206,7 +276,6 @@ export async function GET(request) {
         }
 
         // Snapshot de jornada si cal bloquejar
-        const activeWeekNum = Number(estatJornada?.activeWeek)
         const shouldLockSnapshotNow =
             estatJornada?.lockEditing === true &&
             Number.isInteger(activeWeekNum) &&
@@ -241,7 +310,7 @@ export async function GET(request) {
 
         // Substitucions automàtiques (si la jornada ja ha acabat i hi ha punts)
         const substitutionsActives = (() => {
-            const tePuntsOficials = (punts || []).length > 0
+            const tePuntsOficials = (puntsJornada || []).length > 0
             if (!tePuntsOficials || !Number.isInteger(activeWeekNum)) return false
             if (jornada < activeWeekNum) return true
             if (jornada === activeWeekNum) return estatJornada?.mode === 'season_finished'
@@ -318,4 +387,8 @@ export async function GET(request) {
         )
     }
 }
+
+
+
+
 

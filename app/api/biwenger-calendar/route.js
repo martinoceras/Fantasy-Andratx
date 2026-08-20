@@ -3,6 +3,29 @@ export const revalidate = 0
 
 const BIWENGER_URL = 'https://cf.biwenger.com/api/v2/competitions/la-liga/data?lang=ca&score=2'
 
+const LIVE_STATUSES = new Set([
+    'live',
+    'inprogress',
+    'playing',
+    'en directo',
+    'firsttime',
+    'secondtime',
+    'firsthalf',
+    'secondhalf',
+    'halftime',
+    '1h',
+    '2h',
+    'ht',
+])
+
+const FINISHED_STATUSES = new Set([
+    'finished',
+    'postmatch',
+    'ended',
+    'fulltime',
+    'ft',
+])
+
 function toNumber(value) {
     const num = Number(value)
     return Number.isFinite(num) ? num : null
@@ -22,7 +45,51 @@ function formatDateLabel(value) {
 }
 
 function normalizeStatus(status) {
-    return String(status || '').toLowerCase()
+    return String(status || '')
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+function readNumber(value) {
+    const num = toNumber(value)
+    if (num !== null) return num
+    if (typeof value === 'string') {
+        const match = value.match(/\d+/)
+        if (match) return toNumber(match[0])
+    }
+    return null
+}
+
+function getMinute(game) {
+    const candidates = [
+        game?.minute,
+        game?.elapsed,
+        game?.time,
+        game?.currentMinute,
+        game?.current_minute,
+        game?.liveClock,
+        game?.live_clock,
+        game?.liveData?.minute,
+        game?.liveData?.elapsed,
+    ]
+
+    for (const value of candidates) {
+        const num = readNumber(value)
+        if (num !== null && num >= 0) return num
+    }
+
+    return null
+}
+
+function getScore(team) {
+    if (!team || typeof team !== 'object') return null
+    for (const key of ['score', 'goals', 'result']) {
+        const num = toNumber(team[key])
+        if (num !== null) return num
+    }
+    return null
 }
 
 function getGameLabel(game) {
@@ -33,10 +100,13 @@ function getGameLabel(game) {
 function mapGame(game, index) {
     const dateTs = toNumber(game?.date)
     const dateIso = dateTs ? new Date(dateTs * 1000).toISOString() : null
-    const status = normalizeStatus(game?.status)
-    const isLive = ['live', 'inprogress', 'playing', 'en directo'].includes(status)
-    const isFinished = ['finished', 'postmatch', 'ended', 'fulltime'].includes(status)
-    const minute = toNumber(game?.minute ?? game?.elapsed ?? game?.time)
+    const statusRaw = game?.status ?? game?.matchStatus ?? game?.state ?? null
+    const status = normalizeStatus(statusRaw)
+    const minute = getMinute(game)
+    const homeScore = getScore(game?.home)
+    const awayScore = getScore(game?.away)
+    const isFinished = FINISHED_STATUSES.has(status) || game?.finished === true
+    const isLive = !isFinished && (LIVE_STATUSES.has(status) || (minute !== null && minute > 0))
 
     return {
         id: game?.id || `${game?.round?.id || 'round'}-${index}`,
@@ -46,14 +116,15 @@ function mapGame(game, index) {
         awayTeam: game?.away?.name || 'Visitant',
         homeShield: null,
         awayShield: null,
-        resultat: isFinished && game?.home?.score !== null && game?.away?.score !== null
-            ? `${game.home.score} - ${game.away.score}`
+        resultat: homeScore !== null && awayScore !== null
+            ? `${homeScore} - ${awayScore}`
             : null,
-        status: game?.status || null,
+        status: statusRaw,
         isLive,
+        isFinished,
         minute: isLive ? minute : null,
-        homeScore: game?.home?.score ?? null,
-        awayScore: game?.away?.score ?? null,
+        homeScore,
+        awayScore,
         roundId: game?.round?.id || null,
         roundName: getGameLabel(game),
         roundShort: game?.round?.short || null,
@@ -132,6 +203,8 @@ export async function GET(request) {
         return Response.json({ ok: false, error: error?.message || 'Error intern carregant calendari Biwenger' }, { status: 500 })
     }
 }
+
+
 
 
 

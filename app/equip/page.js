@@ -75,6 +75,7 @@ export default function Equip() {
     })
     const [countdown, setCountdown] = useState(null)
     const [bloqueigPersistitJornada, setBloqueigPersistitJornada] = useState(null)
+    const [retrySnapshotTick, setRetrySnapshotTick] = useState(0)
     const router = useRouter()
     const edicioBloquejada = jornadaStatus.lockEditing === true
 
@@ -135,7 +136,7 @@ export default function Equip() {
         try {
             const params = new URLSearchParams()
             if (jornada) params.set('week', String(jornada))
-            const res = await fetch(`/api/biwenger-calendar${params.toString() ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
+            const res = await fetch(`/api/laliga-calendar${params.toString() ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
             const json = await res.json()
             if (!res.ok || !json?.ok) {
                 setCalendariError(json?.error || 'No s\'ha pogut carregar el calendari')
@@ -285,7 +286,7 @@ export default function Equip() {
             const headers = { 'Content-Type': 'application/json' }
             if (token) headers.Authorization = `Bearer ${token}`
 
-            await fetch('/api/gameweek-lock', {
+            const res = await fetch('/api/gameweek-lock', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
@@ -295,8 +296,13 @@ export default function Equip() {
                     formacio,
                 }),
             })
+            const json = await res.json().catch(() => ({}))
+            if (!res.ok || !json?.ok) {
+                throw new Error(json?.error || 'No s\'ha pogut guardar el snapshot de jornada')
+            }
+            return true
         } catch {
-            // Si falla el snapshot, mantenim app funcional i ho reintentarem al següent refresc
+            return false
         }
     }
 
@@ -320,10 +326,35 @@ export default function Equip() {
         if (!user || !edicioBloquejada || !jornadaStatus.activeWeek) return
         if (bloqueigPersistitJornada === jornadaStatus.activeWeek) return
 
-        setSeleccionat(null)
-        desarAuto(titulars, formacio, suplents, true)
-        guardarSnapshotJornada(jornadaStatus.activeWeek)
-        setBloqueigPersistitJornada(jornadaStatus.activeWeek)
+        let cancel = false
+
+        async function persistirBloqueig() {
+            setSeleccionat(null)
+
+            await desarAuto(titulars, formacio, suplents, true)
+
+            let snapshotOk = false
+            for (let intent = 0; intent < 3 && !snapshotOk; intent += 1) {
+                // Reintent curt per absorbir errors de xarxa al canvi de jornada.
+                snapshotOk = await guardarSnapshotJornada(jornadaStatus.activeWeek)
+                if (!snapshotOk && intent < 2) {
+                    await new Promise((resolve) => setTimeout(resolve, 1200))
+                }
+            }
+
+            if (cancel) return
+
+            if (snapshotOk) {
+                setBloqueigPersistitJornada(jornadaStatus.activeWeek)
+            } else {
+                setTimeout(() => {
+                    if (!cancel) setRetrySnapshotTick((prev) => prev + 1)
+                }, 10000)
+            }
+        }
+
+        void persistirBloqueig()
+        return () => { cancel = true }
     }, [
         user,
         edicioBloquejada,
@@ -332,6 +363,7 @@ export default function Equip() {
         titulars,
         formacio,
         suplents,
+        retrySnapshotTick,
     ])
 
     function canviarFormacio(novaFormacio) {
@@ -491,11 +523,14 @@ export default function Equip() {
                 return
             }
 
-            delete nousTitulars[seleccionat.key]
-            nousSuplents[key] = seleccionat.id
-            if (jugadorId && potJugarDe(jugador, seleccionat.posicio)) {
+            // Intercanvi atòmic: si hi ha jugador a banqueta, sempre passa a titular.
+            if (jugadorId) {
                 nousTitulars[seleccionat.key] = jugadorId
+            } else {
+                delete nousTitulars[seleccionat.key]
             }
+            nousSuplents[key] = seleccionat.id
+
             setTitulars(nousTitulars)
             setSuplents(nousSuplents)
             setSeleccionat(null)
@@ -775,13 +810,13 @@ export default function Equip() {
                     Clica un jugador → clica on el vols posar · Els canvis es desen automàticament
                 </p>
 
-                {/* CALENDARI BIWENGER — FULL WIDTH */}
+                {/* CALENDARI LALIGA — FULL WIDTH */}
                 <div className="mt-8 w-full">
                     <div className="bg-gradient-to-b from-gray-800 to-gray-900 border-2 border-purple-500/40 rounded-2xl p-6 shadow-xl">
                         <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
                             <div>
-                                <h2 className="text-2xl font-bold text-purple-300">⚽ Calendari Biwenger</h2>
-                                <p className="text-gray-400 text-xs mt-1">Horaris oficials, jornades i partits des de Biwenger</p>
+                                <h2 className="text-2xl font-bold text-purple-300">⚽ Calendari LaLiga</h2>
+                                <p className="text-gray-400 text-xs mt-1">Horaris oficials, jornades i partits de tota la temporada</p>
                             </div>
                             <select
                                 value={calendari.jornadaSeleccionada || ''}
@@ -789,9 +824,9 @@ export default function Equip() {
                                 disabled={calendariLoading}
                                 className="bg-gray-900 border-2 border-purple-400 rounded-lg text-sm font-semibold px-4 py-2 text-purple-100 hover:bg-gray-800 transition disabled:opacity-50"
                             >
-                                {(calendari.jornades || []).map(j => (
-                                    <option key={j.week} value={j.week}>
-                                        Jornada {j.week}
+                                {(calendari.jornades || []).map((j, index) => (
+                                    <option key={j.id || j.week || index} value={j.week}>
+                                        {j.name || `Jornada ${j.week}`}
                                     </option>
                                 ))}
                             </select>
@@ -812,19 +847,28 @@ export default function Equip() {
                         {!calendariLoading && !calendariError && (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                                 {(calendari.matches || []).map(match => {
-                                    const statusColor = match.isLive
+                                    const normalizedStatus = String(match.status || '')
+                                        .toLowerCase()
+                                        .replace(/[_-]+/g, ' ')
+                                        .replace(/\s+/g, ' ')
+                                        .trim()
+                                    const liveByStatus = ['live', 'inprogress', 'playing', 'en directo', 'firsttime', 'secondtime', 'firsthalf', 'secondhalf', 'halftime', '1h', '2h', 'ht'].includes(normalizedStatus)
+                                    const finishedByStatus = ['finished', 'postmatch', 'ended', 'fulltime', 'ft', 'aet'].includes(normalizedStatus)
+                                    const isLive = match.isLive === true || liveByStatus || (Number.isFinite(match.minute) && match.minute > 0)
+                                    const isFinished = !isLive && (match.isFinished === true || finishedByStatus)
+                                    const statusColor = isLive
                                         ? 'border-red-500 bg-red-900/20'
-                                        : new Date(match.date) < new Date()
+                                        : isFinished
                                             ? 'border-green-500 bg-green-900/20'
                                             : 'border-gray-600 bg-gray-800/40'
-                                    const statusLabel = match.isLive
+                                    const statusLabel = isLive
                                         ? `EN DIRECTE ${match.minute ? `(${match.minute}')` : ''}`
-                                        : new Date(match.date) < new Date()
+                                        : isFinished
                                             ? 'FINALITZAT'
                                             : 'PRÒXIM'
-                                    const statusBg = match.isLive
+                                    const statusBg = isLive
                                         ? 'bg-red-500'
-                                        : new Date(match.date) < new Date()
+                                        : isFinished
                                             ? 'bg-green-500'
                                             : 'bg-gray-600'
 
@@ -882,7 +926,7 @@ export default function Equip() {
 
                                             {/* Resultat */}
                                             <div className="bg-black/40 rounded-lg p-3 text-center">
-                                                {match.isLive && match.homeScore !== null && match.awayScore !== null ? (
+                                                {isLive && match.homeScore !== null && match.awayScore !== null ? (
                                                     <p className="text-2xl font-bold text-yellow-300">
                                                         {match.homeScore} - {match.awayScore}
                                                     </p>

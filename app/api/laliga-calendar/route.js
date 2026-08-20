@@ -5,6 +5,32 @@ const RESULTS_URL = 'https://www.laliga.com/laliga-easports/resultados'
 const COMPETITION = 'laliga-easports'
 const THESPORTSDB_EVENTSROUND_URL = 'https://www.thesportsdb.com/api/v1/json/123/eventsround.php'
 const THESPORTSDB_LEAGUE_ID = '4335'
+const ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/esp.1/scoreboard'
+
+const LIVE_STATUSES = new Set([
+    'live',
+    'inprogress',
+    'playing',
+    'en directo',
+    'firsttime',
+    'secondtime',
+    'firsthalf',
+    'secondhalf',
+    'halftime',
+    '1h',
+    '2h',
+    'ht',
+])
+
+const FINISHED_STATUSES = new Set([
+    'postmatch',
+    'finished',
+    'ended',
+    'played',
+    'fulltime',
+    'ft',
+    'aet',
+])
 
 function parseJsonSafe(text) {
     try {
@@ -22,6 +48,14 @@ function extractNextData(html) {
 function toNumber(value) {
     const num = Number(value)
     return Number.isFinite(num) ? num : null
+}
+
+function normalizeStatus(status) {
+    return String(status || '')
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
 }
 
 function getScoreFromMatch(match, side) {
@@ -49,8 +83,8 @@ function getScoreFromMatch(match, side) {
 
 function resultIsOfficial(match, home, away) {
     if (home !== null && away !== null) return true
-    const status = String(match?.status || '').toLowerCase()
-    return ['postmatch', 'finished', 'ended', 'played', 'fulltime'].includes(status)
+    const status = normalizeStatus(match?.status)
+    return FINISHED_STATUSES.has(status)
 }
 
 function formatDateLabel(value) {
@@ -85,6 +119,100 @@ function normalizeShieldUrl(raw) {
     return null
 }
 
+function normalizeTeamName(raw) {
+    return String(raw || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]+/g, ' ')
+        .replace(/\b(de|del|deportivo|club|cf|sad|ud|cd)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+function teamNameMatches(a, b) {
+    const na = normalizeTeamName(a)
+    const nb = normalizeTeamName(b)
+    if (!na || !nb) return false
+    if (na === nb) return true
+    if (na.includes(nb) || nb.includes(na)) return true
+    const ta = new Set(na.split(' ').filter(Boolean))
+    const tb = new Set(nb.split(' ').filter(Boolean))
+    let shared = 0
+    for (const token of ta) {
+        if (tb.has(token)) shared += 1
+    }
+    return shared >= 1
+}
+
+function parseMinuteFromText(raw) {
+    if (!raw) return null
+    const match = String(raw).match(/(\d{1,3})/)
+    if (!match) return null
+    const num = Number(match[1])
+    return Number.isFinite(num) ? num : null
+}
+
+function parseEspnEvent(event) {
+    const comp = event?.competitions?.[0]
+    const competitors = Array.isArray(comp?.competitors) ? comp.competitors : []
+    const home = competitors.find((c) => c?.homeAway === 'home')
+    const away = competitors.find((c) => c?.homeAway === 'away')
+    if (!home?.team?.displayName || !away?.team?.displayName) return null
+
+    const statusName = String(event?.status?.type?.name || '').toUpperCase()
+    const statusDetail = String(event?.status?.type?.detail || event?.status?.displayClock || '').trim()
+    const minute = parseMinuteFromText(statusDetail)
+    const isLive = [
+        'STATUS_FIRST_HALF',
+        'STATUS_SECOND_HALF',
+        'STATUS_HALFTIME',
+        'STATUS_EXTRA_TIME',
+        'STATUS_PENALTY_SHOOTOUT',
+        'STATUS_IN_PROGRESS',
+    ].includes(statusName)
+    const isFinished = ['STATUS_FINAL', 'STATUS_FULL_TIME', 'STATUS_AFTER_EXTRA_TIME', 'STATUS_PENALTY'].includes(statusName)
+
+    return {
+        homeTeam: home.team.displayName,
+        awayTeam: away.team.displayName,
+        homeScore: toNumber(home.score),
+        awayScore: toNumber(away.score),
+        minute,
+        isLive,
+        isFinished,
+        statusRaw: statusDetail || statusName || null,
+    }
+}
+
+function applyEspnLiveOverrides(matches = [], espnEvents = []) {
+    if (!Array.isArray(matches) || matches.length === 0) return matches
+    if (!Array.isArray(espnEvents) || espnEvents.length === 0) return matches
+
+    return matches.map((match) => {
+        const espn = espnEvents.find((event) =>
+            teamNameMatches(event.homeTeam, match.homeTeam) &&
+            teamNameMatches(event.awayTeam, match.awayTeam)
+        )
+
+        if (!espn) return match
+
+        const next = { ...match }
+        if (espn.statusRaw) next.status = espn.statusRaw
+        if (espn.isLive) next.isLive = true
+        if (typeof espn.isFinished === 'boolean') next.isFinished = espn.isFinished
+        if (espn.minute !== null && espn.minute >= 0) next.minute = espn.minute
+
+        if (espn.homeScore !== null && espn.awayScore !== null) {
+            next.homeScore = espn.homeScore
+            next.awayScore = espn.awayScore
+            next.resultat = `${espn.homeScore} - ${espn.awayScore}`
+        }
+
+        return next
+    })
+}
+
 function getTeamName(team, fallback) {
     if (!team || typeof team !== 'object') return fallback
     return team.nickname || team.shortname || team.name || fallback
@@ -105,9 +233,11 @@ function getTeamShield(team) {
 function normalizeMatch(match, index) {
     const home = getScoreFromMatch(match, 'home')
     const away = getScoreFromMatch(match, 'away')
-    const status = String(match?.status || '').toLowerCase()
-    const isLive = ['live', 'inprogress', 'playing', 'en directo'].includes(status)
-    const minute = isLive ? getMinuteFromMatch(match) : null
+    const statusRaw = match?.status || null
+    const status = normalizeStatus(statusRaw)
+    const minute = getMinuteFromMatch(match)
+    const isFinished = FINISHED_STATUSES.has(status)
+    const isLive = !isFinished && (LIVE_STATUSES.has(status) || (minute !== null && minute > 0))
 
     return {
         id: match.id || match.slug || `${match.date || 'na'}-${index}`,
@@ -118,8 +248,9 @@ function normalizeMatch(match, index) {
         homeShield: getTeamShield(match.home_team),
         awayShield: getTeamShield(match.away_team),
         resultat: resultIsOfficial(match, home, away) && home !== null && away !== null ? `${home} - ${away}` : null,
-        status: match.status || null,
+        status: statusRaw,
         isLive,
+        isFinished,
         minute,
         homeScore: home,
         awayScore: away,
@@ -150,6 +281,7 @@ function normalizeSportsDbMatch(event, index) {
         resultat: hasRealResult ? `${homeScore} - ${awayScore}` : null,
         status: event?.strStatus || null,
         isLive,
+        isFinished,
         minute: null,
         homeScore,
         awayScore,
@@ -320,6 +452,24 @@ export async function GET(request) {
                 .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime())
         }
 
+        if (selectedWeek === currentWeek && Array.isArray(matches) && matches.length > 0) {
+            try {
+                const espnRes = await fetch(ESPN_SCOREBOARD_URL, {
+                    cache: 'no-store',
+                    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+                })
+                if (espnRes.ok) {
+                    const espnJson = await espnRes.json().catch(() => null)
+                    const espnEvents = (espnJson?.events || [])
+                        .map(parseEspnEvent)
+                        .filter(Boolean)
+                    matches = applyEspnLiveOverrides(matches, espnEvents)
+                }
+            } catch {
+                // Si ESPN falla, mantenim dades de LaLiga/SportsDB
+            }
+        }
+
         if (!matches) {
             matches = []
         }
@@ -337,6 +487,8 @@ export async function GET(request) {
         return Response.json({ ok: false, error: error.message || 'Error intern carregant el calendari' }, { status: 500 })
     }
 }
+
+
 
 
 

@@ -158,8 +158,8 @@ function CampEquip({ userId, teamsData, allPlayers, puntsByPlayer }) {
         const pts = jugador ? getPuntsJugador(jugador.id) : null
 
         return (
-            <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 82 }}>
-                <div className={`w-16 h-16 border-2 flex items-center justify-center relative transition-all ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'}`}>
+            <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 74 }}>
+                <div className={`w-14 h-14 border-2 flex items-center justify-center relative transition-all ${jugador ? `${colors.bg} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'}`}>
                     {jugador ? (
                         <BiwengerAvatar
                             key={`cls_banq_${jugador.id}_${jugador.foto || ''}`}
@@ -173,11 +173,11 @@ function CampEquip({ userId, teamsData, allPlayers, puntsByPlayer }) {
                         <span className="text-white/25 text-base">{index + 1}</span>
                     )}
                 </div>
-                <span className="text-[10px] text-gray-500 mt-1 font-semibold">{posicio.slice(0, 3).toUpperCase()} · #{index + 1}</span>
-                <span className="text-white text-xs mt-0.5 text-center truncate w-full font-semibold">
+                <span className="text-[9px] text-gray-500 mt-0.5 font-semibold">{posicio.slice(0, 3).toUpperCase()} · #{index + 1}</span>
+                <span className="text-white text-[11px] mt-0.5 text-center truncate w-full font-semibold">
                     {jugador ? nomCurt(jugador.nombre) : '---'}
                 </span>
-                {jugador && <span className="text-green-400 text-[11px] font-bold">{pts} pts</span>}
+                {jugador && <span className="text-green-400 text-[10px] font-bold leading-none mt-0.5">{pts} pts</span>}
             </div>
         )
     }
@@ -242,19 +242,21 @@ function CampEquip({ userId, teamsData, allPlayers, puntsByPlayer }) {
                 </div>
 
                 {/* Banqueta */}
-                <div className="w-[430px] max-w-full flex-shrink-0 min-w-0">
-                    <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 overflow-y-auto" style={{ maxHeight: 560 }}>
-                        <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">
+                <div className="w-[280px] max-w-full flex-shrink-0 min-w-0">
+                    <div className="bg-gray-900 border border-gray-700 rounded-xl p-2.5 h-[560px] overflow-hidden flex flex-col">
+                        <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-2">
                             Banqueta ({Object.values(suplents).filter(Boolean).length})
                         </p>
-                        {Object.entries(BANQUETA_SLOTS).map(([posicio, totalSlots]) => (
-                            <div key={posicio} className="mb-3 last:mb-0">
-                                <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold mb-2">{posicio}</p>
-                                <div className="flex gap-3 flex-wrap justify-center w-full">
-                                    {Array.from({ length: totalSlots }).map((_, index) => renderBanquetaSlot(posicio, index))}
+                        <div className="flex-1 flex flex-col justify-between min-h-0">
+                            {Object.entries(BANQUETA_SLOTS).map(([posicio, totalSlots]) => (
+                                <div key={posicio} className="py-1">
+                                    <p className="text-gray-500 text-[9px] uppercase tracking-wider font-semibold mb-1">{posicio}</p>
+                                    <div className="flex gap-2 flex-wrap justify-center w-full">
+                                        {Array.from({ length: totalSlots }).map((_, index) => renderBanquetaSlot(posicio, index))}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -283,6 +285,10 @@ export default function Classificacio() {
     const [jornadaSeleccionada, setJornadaSeleccionada]   = useState(1)
     const [rankingJornada, setRankingJornada]             = useState([])
     const [carregantJornada, setCarregantJornada]         = useState(false)
+    const [participantSelJornada, setParticipantSelJornada] = useState(null)
+    const [teamsDataJornada, setTeamsDataJornada]         = useState([])
+    const [allPlayersJornada, setAllPlayersJornada]       = useState([])
+    const [puntsByPlayerJornada, setPuntsByPlayerJornada] = useState({})
 
     const jornades = Array.from({ length: 38 }, (_, i) => i + 1)
 
@@ -296,7 +302,9 @@ export default function Classificacio() {
         if (importantPunts) return
         setImportantPunts(true)
         try {
-            const res = await fetch('/api/admin/import-futmondo-points', { cache: 'no-store' })
+            const jornada = Number(jornadaActual)
+            const query = Number.isInteger(jornada) && jornada > 0 ? `?jornada=${jornada}` : ''
+            const res = await fetch(`/api/admin/import-futmondo-points${query}`, { cache: 'no-store' })
             const json = await res.json().catch(() => ({}))
             if (!res.ok || !json?.ok) {
                 alert(json?.error || 'No s\'ha pogut importar els punts')
@@ -322,13 +330,29 @@ export default function Classificacio() {
             const activeWeek = Number(estat.activeWeek)
             if (!Number.isInteger(activeWeek) || activeWeek <= 0) return
 
-            const jornadaRanking = estat.mode === 'countdown' && activeWeek > 1 ? activeWeek - 1 : activeWeek
+            // Si la jornada activa té mode 'in_game' o 'season_finished', mostrem-la directament.
+            // Si estem en 'countdown' (esperant la propera jornada), mostrem l'última jornada
+            // que tingui punts importats, perquè l'activa encara no ha jugat.
+            let jornadaRanking = activeWeek
+            if (estat.mode === 'countdown' && activeWeek > 1) {
+                const prevJornada = activeWeek - 1
+                const logRes = await fetch(`/api/admin/gameweek-points?jornada=${prevJornada}`, { cache: 'no-store' })
+                    .then(r => r.json()).catch(() => ({}))
+                if (logRes?.ok && logRes?.lastImportAt) {
+                    jornadaRanking = prevJornada
+                }
+            }
+
             setJornadaActual(jornadaRanking)
             setJornadaSeleccionada((prev) => (prev === 1 ? jornadaRanking : prev))
         }
 
         void syncJornadaActual()
-        return () => { actiu = false }
+        const refreshId = setInterval(() => { void syncJornadaActual() }, 60000)
+        return () => {
+            actiu = false
+            clearInterval(refreshId)
+        }
     }, [])
 
     useEffect(() => {
@@ -421,63 +445,39 @@ export default function Classificacio() {
 
         void loadActual()
         return () => { actiu = false }
-    }, [tabActiva, jornadaActual])
+    }, [tabActiva, jornadaActual, refreshKey])
 
     // Carrega ranking d'una jornada passada (tab 2)
     useEffect(() => {
         if (tabActiva !== 'passades') return
         let actiu = true
+
         async function loadJornada() {
             setCarregantJornada(true)
             setRankingJornada([])
-            const [
-                { data: punts },
-                { data: teams },
-                { data: perfils },
-                { data: snapshots },
-                { data: picks },
-                estatJornadaRes,
-            ] = await Promise.all([
-                supabase.from('player_punts').select('player_id, punts').eq('jornada', jornadaSeleccionada),
-                supabase.from('teams').select('user_id, alineacio, suplents'),
-                supabase.from('profiles').select('id, nom, email'),
-                supabase.from('gameweek_lineups').select('user_id, jornada, alineacio, suplents').eq('jornada', jornadaSeleccionada),
-                supabase.from('draft_picks').select('user_id'),
-                fetch('/api/gameweek-status', { cache: 'no-store' }).then(r => r.json()).catch(() => ({})),
-            ])
-            if (!actiu) return
-            const draftedUserIds = new Set((picks || []).map((pick) => pick?.user_id).filter(Boolean))
-            const perfilsDraft = (perfils || []).filter((perfil) => draftedUserIds.has(perfil.id))
-            const puntsMapa = {}
-            punts?.forEach((p) => {
-                const key = String(p.player_id)
-                puntsMapa[key] = (puntsMapa[key] || 0) + Number(p.punts || 0)
-            })
+            const res = await fetch(`/api/classificacio/jornada?jornada=${jornadaSeleccionada}`, { cache: 'no-store' })
+            const json = await res.json().catch(() => ({}))
 
-            const substitutionsActives = potAplicarBanqueta({
-                jornada: jornadaSeleccionada,
-                estatJornada: estatJornadaRes,
-                tePuntsOficials: (punts || []).length > 0,
-            })
+            if (!actiu || !res.ok || !json?.ok) {
+                setTeamsDataJornada([])
+                setAllPlayersJornada([])
+                setPuntsByPlayerJornada({})
+                setParticipantSelJornada(null)
+                setCarregantJornada(false)
+                return
+            }
 
-            const snapshotByUser = new Map((snapshots || []).map(s => [s.user_id, s]))
-            const teamsAplicats = (teams || []).filter((team) => draftedUserIds.has(team.user_id)).map((team) => {
-                const snap = snapshotByUser.get(team.user_id)
-                const alineacioBase = snap?.alineacio || team.alineacio || {}
-                const suplentsBase = snap?.suplents || team.suplents || {}
-                const { alineacioFinal } = substitutionsActives
-                    ? aplicarSubstitucionsAutomatiques(alineacioBase, suplentsBase, puntsMapa)
-                    : { alineacioFinal: alineacioBase }
-                return { ...team, alineacio: alineacioFinal }
-            })
-
-            const rankingCalculat = perfilsDraft.map(perfil => {
-                const team = teamsAplicats.find(t => t.user_id === perfil.id)
-                const alineacio = team?.alineacio || {}
-                const totalPunts = Object.values(alineacio).reduce((sum, pid) => sum + (puntsMapa[pid] || 0), 0)
-                return { userId: perfil.id, nom: perfil.nom || perfil.email || '...', punts: totalPunts }
-            }).sort((a, b) => b.punts - a.punts)
+            const rankingCalculat = json.rankingJornadaActual || []
             setRankingJornada(rankingCalculat)
+            setTeamsDataJornada(json.teamsData || [])
+            setAllPlayersJornada(json.allPlayers || [])
+            setPuntsByPlayerJornada(json.puntsByPlayer || {})
+
+            setParticipantSelJornada((prev) => {
+                if (prev && rankingCalculat.some((p) => p.userId === prev)) return prev
+                return json.participantSel || rankingCalculat[0]?.userId || null
+            })
+
             setCarregantJornada(false)
         }
         void loadJornada()
@@ -602,7 +602,7 @@ export default function Classificacio() {
 
                     {/* ── TAB 2: Jornades passades ── */}
                     {tabActiva === 'passades' && (
-                        <section className="max-w-2xl">
+                        <section>
                             <p className="text-gray-400 text-sm mb-3">Selecciona una jornada:</p>
                             <div className="grid grid-cols-7 md:grid-cols-10 gap-1.5 mb-5">
                                 {jornades.map(j => (
@@ -615,29 +615,65 @@ export default function Classificacio() {
                                     </button>
                                 ))}
                             </div>
-                            <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                                <p className="text-white font-semibold mb-3">Classificació — Jornada {jornadaSeleccionada}</p>
-                                {carregantJornada ? (
-                                    <p className="text-gray-500 text-sm text-center py-6 animate-pulse">Carregant...</p>
-                                ) : rankingJornada.length === 0 ? (
-                                    <p className="text-gray-500 text-sm text-center py-6">
-                                        Encara no hi ha puntuacions per la jornada {jornadaSeleccionada}.
+                            <div className="flex gap-4 items-start flex-col lg:flex-row">
+                                <div className="w-full lg:w-72 flex-shrink-0">
+                                    <p className="text-gray-400 text-xs uppercase tracking-wider font-semibold mb-2">
+                                        Classificació — Jornada {jornadaSeleccionada}
                                     </p>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {rankingJornada.map((p, i) => (
-                                            <div key={p.userId} className="flex items-center gap-3 bg-gray-950/70 border border-gray-800 rounded-lg p-3">
-                                                <div className="text-lg w-9 text-center font-bold">
-                                                    {i < 3 ? ['🥇','🥈','🥉'][i] : <span className="text-gray-400 text-sm">{i + 1}</span>}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="font-semibold text-white truncate">{p.nom}</div>
-                                                </div>
-                                                <div className="text-green-400 font-bold">{p.punts} pts</div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                                    {carregantJornada ? (
+                                        <p className="text-gray-500 text-sm text-center py-6 animate-pulse">Carregant...</p>
+                                    ) : rankingJornada.length === 0 ? (
+                                        <p className="text-gray-500 text-sm text-center py-6 bg-gray-900 border border-gray-800 rounded-xl">
+                                            Encara no hi ha puntuacions per la jornada {jornadaSeleccionada}.
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-1.5">
+                                            {rankingJornada.map((p, i) => {
+                                                const esSel = participantSelJornada === p.userId
+                                                const medalles = ['🥇', '🥈', '🥉']
+                                                return (
+                                                    <button key={p.userId} onClick={() => setParticipantSelJornada(p.userId)}
+                                                            className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 transition border text-left
+                                                                ${esSel
+                                                                    ? 'bg-green-500/20 border-green-500 shadow-lg shadow-green-900/30'
+                                                                    : 'bg-gray-900 border-gray-800 hover:bg-gray-800'}`}>
+                                                        <div className="text-base w-8 text-center font-bold">
+                                                            {i < 3 ? medalles[i] : <span className="text-gray-400 text-sm">{i + 1}</span>}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className={`font-semibold truncate text-sm ${esSel ? 'text-green-300' : 'text-white'}`}>
+                                                                {p.nom}
+                                                            </div>
+                                                        </div>
+                                                        <div className={`font-bold text-sm ${esSel ? 'text-green-300' : 'text-green-400'}`}>
+                                                            {p.punts} pts
+                                                        </div>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                    {participantSelJornada && !carregantJornada ? (
+                                        <>
+                                            <p className="text-gray-400 text-xs uppercase tracking-wider font-semibold mb-2">
+                                                Equip de {rankingJornada.find(p => p.userId === participantSelJornada)?.nom} — Jornada {jornadaSeleccionada}
+                                            </p>
+                                            <CampEquip
+                                                userId={participantSelJornada}
+                                                teamsData={teamsDataJornada}
+                                                allPlayers={allPlayersJornada}
+                                                puntsByPlayer={puntsByPlayerJornada}
+                                            />
+                                        </>
+                                    ) : (
+                                        <p className="text-gray-600 text-sm text-center py-12">
+                                            {carregantJornada ? 'Carregant equip...' : 'Selecciona un usuari per veure l\'alineació de la jornada'}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </section>
                     )}
