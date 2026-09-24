@@ -592,9 +592,11 @@ export default function Admin() {
 
     async function importarPuntsFutmondo() {
         setImportantFutmondo(true)
-        setMissatgePunts('')
+        setMissatgePunts('⏳ Importació oficial en curs... pot trigar diversos minuts. No tanquis la pestanya.')
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000)
         try {
-            const res = await fetch('/api/admin/import-futmondo-points', { cache: 'no-store' })
+            const res = await fetch('/api/admin/import-futmondo-points', { cache: 'no-store', signal: controller.signal })
             const data = await res.json().catch(() => ({}))
             if (!res.ok || !data?.ok) {
                 setMissatgePunts(`❌ Error important punts oficials: ${data?.error || 'Resposta invàlida'}`)
@@ -615,8 +617,12 @@ export default function Admin() {
                 `✅ FutbolFantasy oficial (Jornada ${data.jornada || jornadaPunts}): ${data.matched || 0} jugadors desats a la BD${data.importedAt ? ` · última importació ${new Intl.DateTimeFormat('ca-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(data.importedAt))}` : ''}${zeros ? ` · ${zeros} amb 0 pts` : ''}${unmatched ? ` · ${unmatched} sense encaix` : ''}`
             )
         } catch (error) {
-            setMissatgePunts(`❌ Error important punts oficials: ${error.message}`)
+            const isAbort = error?.name === 'AbortError'
+            setMissatgePunts(isAbort
+                ? '❌ La importació ha excedit el temps límit. Torna-ho a intentar d’aquí uns minuts.'
+                : `❌ Error important punts oficials: ${error.message}`)
         } finally {
+            clearTimeout(timeoutId)
             setImportantFutmondo(false)
             setTimeout(() => setMissatgePunts(''), 8000)
         }
@@ -1277,7 +1283,7 @@ export default function Admin() {
                                     disabled={importantFutmondo || desantPunts}
                                     className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
                                 >
-                                    {importantFutmondo ? 'Important FutbolFantasy...' : '📥 Importar FutbolFantasy oficial'}
+                                    {importantFutmondo ? 'Importació en curs...' : '📥 Importar FutbolFantasy oficial'}
                                 </button>
                             </div>
                             {players.length === 0 ? (
