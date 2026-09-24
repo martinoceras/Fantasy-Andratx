@@ -76,6 +76,7 @@ export default function Equip() {
     const [countdown, setCountdown] = useState(null)
     const [bloqueigPersistitJornada, setBloqueigPersistitJornada] = useState(null)
     const [retrySnapshotTick, setRetrySnapshotTick] = useState(0)
+    const [saveError, setSaveError] = useState('')
     const saveChainRef = useRef(Promise.resolve())
     const pendingSavesRef = useRef(0)
     const router = useRouter()
@@ -128,8 +129,10 @@ export default function Equip() {
             body: JSON.stringify(payload),
         })
         const json = await res.json().catch(() => ({}))
-        if (!res.ok || !json?.ok) return null
-        return json.team || null
+        if (!res.ok || !json?.ok) {
+            return { ok: false, error: json?.error || `Error HTTP ${res.status}` }
+        }
+        return { ok: true, team: json.team || null }
     }
 
     async function carregarCalendari(jornada) {
@@ -188,8 +191,8 @@ export default function Equip() {
                     alineacio: nousTitulars,
                     suplents: nousSuplents,
                 }
-                const nouTeam = await desarTeamServidor(payload)
-                if (nouTeam) setTeam(nouTeam)
+                        const resultat = await desarTeamServidor(payload)
+                        if (resultat?.ok && resultat.team) setTeam(resultat.team)
             }
 
             setLoading(false)
@@ -308,10 +311,10 @@ export default function Equip() {
         }
     }
 
-    async function desarAuto(nousTitulars, novaFormacio, nousSuplents, forcarGuardat = false) {
+    async function desarAuto(nousTitulars, novaFormacio, nousSuplents) {
         if (!user) return
-        if (edicioBloquejada && !forcarGuardat) return
         setDesant(true)
+        setSaveError('')
         const payload = {
             user_id: user.id,
             temporada: TEMPORADA,
@@ -324,8 +327,21 @@ export default function Equip() {
         saveChainRef.current = saveChainRef.current
             .catch(() => null)
             .then(async () => {
-                const nouTeam = await desarTeamServidor(payload)
-                if (nouTeam) setTeam(nouTeam)
+                let lastError = ''
+                for (let intent = 0; intent < 3; intent += 1) {
+                    const resultat = await desarTeamServidor(payload)
+                    if (resultat?.ok) {
+                        if (resultat.team) setTeam(resultat.team)
+                        return
+                    }
+
+                    lastError = resultat?.error || 'No s\'ha pogut desar l\'alineació'
+                    if (intent < 2) {
+                        await new Promise((resolve) => setTimeout(resolve, 700 * (intent + 1)))
+                    }
+                }
+
+                setSaveError(lastError || 'No s\'ha pogut desar l\'alineació')
             })
             .finally(() => {
                 pendingSavesRef.current = Math.max(0, pendingSavesRef.current - 1)
@@ -382,10 +398,6 @@ export default function Equip() {
     ])
 
     function canviarFormacio(novaFormacio) {
-        if (edicioBloquejada) {
-            alert('JORNADA EN JOC: la teva alineació està bloquejada fins que acabi la jornada.')
-            return
-        }
         const { nousTitulars, nousSuplents } = autoOmplirPlantilla(jugadors, novaFormacio, titulars, suplents)
         setFormacio(novaFormacio)
         setTitulars(nousTitulars)
@@ -413,10 +425,6 @@ export default function Equip() {
     }
 
     function handleClickSlot(posicio, index) {
-        if (edicioBloquejada) {
-            alert('JORNADA EN JOC: no pots editar titulars ni suplents ara mateix.')
-            return
-        }
         const key = `${posicio}_${index}`
         const jugadorActualId = titulars[key]
         const jugadorActual = jugadors.find(j => j.id === jugadorActualId)
@@ -490,10 +498,6 @@ export default function Equip() {
     }
 
     function handleClickBanqueta(posicio, index) {
-        if (edicioBloquejada) {
-            alert('JORNADA EN JOC: no pots editar titulars ni suplents ara mateix.')
-            return
-        }
         const key = `${posicio}_${index}`
         const jugadorId = suplents[key]
         const jugador = jugadors.find(j => j.id === jugadorId)
@@ -590,7 +594,7 @@ export default function Equip() {
     const formacioActual = FORMACIONS[formacio]
 
     function handleDragStart(source) {
-        if (edicioBloquejada || !source?.id) return
+        if (!source?.id) return
         setSeleccionat(source)
     }
 
@@ -600,13 +604,13 @@ export default function Equip() {
 
     function handleDropOnSlot(event, posicio, index) {
         event.preventDefault()
-        if (edicioBloquejada || !seleccionat?.id) return
+        if (!seleccionat?.id) return
         handleClickSlot(posicio, index)
     }
 
     function handleDropOnBanqueta(event, posicio, index) {
         event.preventDefault()
-        if (edicioBloquejada || !seleccionat?.id) return
+        if (!seleccionat?.id) return
         handleClickBanqueta(posicio, index)
     }
 
@@ -642,10 +646,10 @@ export default function Equip() {
                     onClick={() => handleClickSlot(posicio, index)}
                     onDragOver={allowDrop}
                     onDrop={(event) => handleDropOnSlot(event, posicio, index)}
-                    draggable={!edicioBloquejada && !!jugador}
+                    draggable={!!jugador}
                     onDragStart={() => handleDragStart({ tipus: 'titular', key, posicio, id: jugador?.id || null })}
                     className={`
-            border-2 flex items-center justify-center relative ${edicioBloquejada ? 'cursor-not-allowed' : 'cursor-pointer'}
+            border-2 flex items-center justify-center relative cursor-pointer
             transition-all duration-150 select-none
             ${jugador
                         ? `${colors.light} ${colors.border}`
@@ -653,7 +657,7 @@ export default function Equip() {
                             ? 'border-dashed border-white bg-white/15 animate-pulse'
                             : 'border-dashed border-white/20 bg-black/20'
                     }
-            ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : mostraCanviPossible ? `ring-2 ${POS_RING_COMPAT[posicio]} shadow-md` : edicioBloquejada ? '' : 'hover:scale-105'}
+            ${esSeleccionat ? 'ring-4 ring-white scale-110 shadow-lg' : mostraCanviPossible ? `ring-2 ${POS_RING_COMPAT[posicio]} shadow-md` : 'hover:scale-105'}
           `}
                     style={{ width: slotSize, height: slotSize }}
                  >
@@ -700,6 +704,7 @@ export default function Equip() {
                         <p className="text-gray-500 text-xs">
                             {TEMPORADA} · {jugadors.length}/{maxJugadors} jugadors
                             {desant && <span className="ml-2 text-green-400 animate-pulse">· Desant...</span>}
+                            {saveError && <span className="ml-2 text-red-400">· {saveError}</span>}
                         </p>
                     </div>
                     <Link href="/classificacio" className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg text-sm transition">
@@ -713,7 +718,7 @@ export default function Equip() {
                     ) : edicioBloquejada ? (
                         <div>
                             <p className="text-red-300 text-base font-bold">JORNADA EN JOC</p>
-                            <p className="text-red-200 text-xs mt-1">Titulars i banqueta bloquejats. Aquesta alineació serà la que puntuarà.</p>
+                            <p className="text-red-200 text-xs mt-1">La classificació de la jornada ja queda congelada, però el teu equip continua desant-se a cada canvi.</p>
                         </div>
                     ) : jornadaStatus.mode === 'countdown' && countdown ? (
                         <div>
@@ -731,8 +736,7 @@ export default function Equip() {
                 <div className="flex gap-1.5 flex-wrap mb-4">
                     {Object.keys(FORMACIONS).map(f => (
                         <button key={f} onClick={() => canviarFormacio(f)}
-                                disabled={edicioBloquejada}
-                                className={`px-3 py-1 rounded-lg text-sm font-mono font-bold transition ${formacio === f ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'} ${edicioBloquejada ? 'opacity-50 cursor-not-allowed hover:bg-gray-800' : ''}`}>
+                                className={`px-3 py-1 rounded-lg text-sm font-mono font-bold transition ${formacio === f ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
                             {f}
                         </button>
                     ))}
@@ -825,9 +829,9 @@ export default function Equip() {
                                                             onClick={() => handleClickBanqueta(posicio, index)}
                                                             onDragOver={allowDrop}
                                                             onDrop={(event) => handleDropOnBanqueta(event, posicio, index)}
-                                                            draggable={!edicioBloquejada && !!jugador}
+                                                            draggable={!!jugador}
                                                             onDragStart={() => handleDragStart({ tipus: 'banqueta', key: slotKey, posicio, id: jugador?.id || null })}
-                                                            className={`w-16 h-16 border-2 flex items-center justify-center relative transition-all ${edicioBloquejada ? 'cursor-not-allowed' : jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador && !edicioBloquejada ? 'hover:scale-105' : ''}`}
+                                                            className={`w-16 h-16 border-2 flex items-center justify-center relative transition-all ${jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador ? 'hover:scale-105' : ''}`}
                                                         >
                                                             {jugador
                                                                 ? <>

@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const TEMPORADA_DEFAULT = '2026-27'
+const LOCK_LEAD_MS = 1000
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -40,8 +41,11 @@ async function mirrorToActiveGameweek({ origin, payload }) {
         if (!statusRes.ok || !statusJson?.ok) return
 
         const activeWeek = Number(statusJson.activeWeek)
-        const lockEditing = statusJson.lockEditing === true
-        if (!Number.isInteger(activeWeek) || activeWeek <= 0 || lockEditing) return
+        const targetTs = Date.parse(statusJson.targetDate)
+        if (!Number.isInteger(activeWeek) || activeWeek <= 0 || !Number.isFinite(targetTs)) return
+
+        const nowTs = Date.now()
+        if (nowTs >= targetTs - LOCK_LEAD_MS) return
 
         const snapshotPayload = {
             user_id: payload.user_id,
@@ -131,5 +135,6 @@ export async function POST(request) {
         return Response.json({ ok: false, error: error?.message || 'Error desant equip' }, { status: 500 })
     }
 }
+
 
 

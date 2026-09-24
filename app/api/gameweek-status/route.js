@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const FINAL_STATUSES = new Set(['postmatch', 'finished', 'ended', 'played', 'fulltime'])
+const LOCK_LEAD_MS = 1000
 
 function toTs(value) {
     if (!value) return null
@@ -59,6 +60,7 @@ export async function GET(request) {
         const currentWeek = Number(currentJson.selectedWeek) || Number(jornadas[0]?.week) || 1
         const currentMatches = Array.isArray(currentJson.matches) ? currentJson.matches : []
         const { firstStartTs } = getWeekWindow(currentMatches)
+        const lockEditingTs = firstStartTs - LOCK_LEAD_MS
 
         if (!firstStartTs) {
             return Response.json({
@@ -75,19 +77,19 @@ export async function GET(request) {
         const anyLive = currentMatches.some((m) => m?.isLive)
         const allFinished = currentMatches.length > 0 && currentMatches.every(isMatchFinished)
 
-        if (anyLive || (nowTs >= firstStartTs && !allFinished)) {
+        if (anyLive || (nowTs >= lockEditingTs && !allFinished)) {
             return Response.json({
                 ok: true,
                 mode: 'in_game',
                 lockEditing: true,
                 activeWeek: currentWeek,
-                targetDate: null,
+                targetDate: new Date(firstStartTs).toISOString(),
                 serverNow: new Date(nowTs).toISOString(),
                 message: `JORNADA ${currentWeek} EN JOC`,
             })
         }
 
-        if (nowTs < firstStartTs) {
+        if (nowTs < lockEditingTs) {
             return Response.json(buildCountdownPayload({
                 activeWeek: currentWeek,
                 targetTs: firstStartTs,
@@ -139,4 +141,5 @@ export async function GET(request) {
         return Response.json({ ok: false, error: error.message || 'Error intern calculant l\'estat de jornada' }, { status: 500 })
     }
 }
+
 
