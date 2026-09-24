@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import Link from 'next/link'
@@ -76,6 +76,8 @@ export default function Equip() {
     const [countdown, setCountdown] = useState(null)
     const [bloqueigPersistitJornada, setBloqueigPersistitJornada] = useState(null)
     const [retrySnapshotTick, setRetrySnapshotTick] = useState(0)
+    const saveChainRef = useRef(Promise.resolve())
+    const pendingSavesRef = useRef(0)
     const router = useRouter()
     const edicioBloquejada = jornadaStatus.lockEditing === true
 
@@ -317,9 +319,22 @@ export default function Equip() {
             alineacio: nousTitulars ?? titulars,
             suplents: nousSuplents ?? suplents,
         }
-        const nouTeam = await desarTeamServidor(payload)
-        if (nouTeam) setTeam(nouTeam)
-        setTimeout(() => setDesant(false), 800)
+
+        pendingSavesRef.current += 1
+        saveChainRef.current = saveChainRef.current
+            .catch(() => null)
+            .then(async () => {
+                const nouTeam = await desarTeamServidor(payload)
+                if (nouTeam) setTeam(nouTeam)
+            })
+            .finally(() => {
+                pendingSavesRef.current = Math.max(0, pendingSavesRef.current - 1)
+                if (pendingSavesRef.current === 0) {
+                    setTimeout(() => setDesant(false), 350)
+                }
+            })
+
+        await saveChainRef.current
     }
 
     useEffect(() => {
@@ -431,7 +446,10 @@ export default function Equip() {
         }
 
         // Deseleccionar si cliquem el mateix
-        if (seleccionat.key === key) { setSeleccionat(null); return }
+        if ((seleccionat.tipus === 'titular' || seleccionat.tipus === 'slot-buit') && seleccionat.key === key) {
+            setSeleccionat(null)
+            return
+        }
 
         const jugadorMovent = jugadors.find(j => j.id === seleccionat.id)
 
@@ -504,7 +522,7 @@ export default function Equip() {
         }
 
         // Deseleccionar si cliquem el mateix
-        if (seleccionat.key === key) { setSeleccionat(null); return }
+        if (seleccionat.tipus === 'banqueta' && seleccionat.key === key) { setSeleccionat(null); return }
 
         if (seleccionat.tipus === 'titular') {
             const jugadorTitular = jugadors.find(j => j.id === seleccionat.id)
@@ -561,10 +579,54 @@ export default function Equip() {
             return
         }
 
+        if (seleccionat.tipus === 'slot-buit') {
+            if (!jugador) {
+                setSeleccionat(null)
+                return
+            }
+
+            if (seleccionat.posicio !== posicio) {
+                alert('Aquest slot titular buit nomes accepta jugadors de la mateixa posicio')
+                setSeleccionat(null)
+                return
+            }
+
+            const nousTitulars = { ...titulars, [seleccionat.key]: jugador.id }
+            const nousSuplents = { ...suplents }
+            delete nousSuplents[key]
+
+            setTitulars(nousTitulars)
+            setSuplents(nousSuplents)
+            setSeleccionat(null)
+            desarAuto(nousTitulars, undefined, nousSuplents)
+            return
+        }
+
         setSeleccionat(null)
     }
 
     const formacioActual = FORMACIONS[formacio]
+
+    function handleDragStart(source) {
+        if (edicioBloquejada || !source?.id) return
+        setSeleccionat(source)
+    }
+
+    function allowDrop(event) {
+        event.preventDefault()
+    }
+
+    function handleDropOnSlot(event, posicio, index) {
+        event.preventDefault()
+        if (edicioBloquejada || !seleccionat?.id) return
+        handleClickSlot(posicio, index)
+    }
+
+    function handleDropOnBanqueta(event, posicio, index) {
+        event.preventDefault()
+        if (edicioBloquejada || !seleccionat?.id) return
+        handleClickBanqueta(posicio, index)
+    }
 
     function getBanquetaJugador(posicio, index) {
         const id = suplents[`${posicio}_${index}`]
@@ -596,6 +658,10 @@ export default function Equip() {
             <div key={key} className="flex flex-col items-center" style={{ width: outerWidth }}>
                 <div
                     onClick={() => handleClickSlot(posicio, index)}
+                    onDragOver={allowDrop}
+                    onDrop={(event) => handleDropOnSlot(event, posicio, index)}
+                    draggable={!edicioBloquejada && !!jugador}
+                    onDragStart={() => handleDragStart({ tipus: 'titular', key, posicio, id: jugador?.id || null })}
                     className={`
             border-2 flex items-center justify-center relative ${edicioBloquejada ? 'cursor-not-allowed' : 'cursor-pointer'}
             transition-all duration-150 select-none
@@ -768,12 +834,17 @@ export default function Equip() {
 
                                         <div className="flex gap-3 flex-wrap justify-center w-full">
                                             {Array.from({ length: totalSlots }).map((_, index) => {
+                                                const slotKey = `${posicio}_${index}`
                                                 const jugador = getBanquetaJugador(posicio, index)
                                                 const esSelec = jugador && seleccionat?.id === jugador.id
                                                 return (
                                                     <div key={`${posicio}_${index}`} className="flex flex-col items-center" style={{ width: 82 }}>
                                                         <div
                                                             onClick={() => handleClickBanqueta(posicio, index)}
+                                                            onDragOver={allowDrop}
+                                                            onDrop={(event) => handleDropOnBanqueta(event, posicio, index)}
+                                                            draggable={!edicioBloquejada && !!jugador}
+                                                            onDragStart={() => handleDragStart({ tipus: 'banqueta', key: slotKey, posicio, id: jugador?.id || null })}
                                                             className={`w-16 h-16 border-2 flex items-center justify-center relative transition-all ${edicioBloquejada ? 'cursor-not-allowed' : jugador ? 'cursor-pointer' : 'cursor-default'} ${jugador ? `${colors.light} ${colors.border}` : 'bg-black/20 border-dashed border-white/20'} ${esSelec ? 'ring-2 ring-white scale-105' : jugador && !edicioBloquejada ? 'hover:scale-105' : ''}`}
                                                         >
                                                             {jugador

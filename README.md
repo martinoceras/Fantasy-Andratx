@@ -53,3 +53,29 @@ Vercel funciona be per aquest flux. Si uses un altre hosting, mantingues HTTPS a
 - Script DB (bloqueig punts): `supabase/anti-trampes-punts-lock.sql`
 - Documentació funcional: `docs/anti-trampes.md`
 - Endpoint super admin punts: `POST /api/admin/gameweek-points` (requereix `ADMIN_SECRET`)
+
+## Importar el draft des d'una altra plataforma
+
+Si necessites crear usuaris que falten, assignar-los les contrasenyes inicials i carregar tots els picks del draft a Supabase:
+
+```bash
+npm run seed:draft
+```
+
+Per fer una prova sense escriure dades:
+
+```bash
+npm run seed:draft -- --dry-run
+```
+
+També pots cridar l'endpoint intern d'administració:
+
+```bash
+POST /api/admin/seed-draft-roster
+```
+
+Aquest procés:
+- crea perfils i usuaris que faltin
+- deixa un correu i contrasenya inicials per a cada participant nou
+- neteja `draft_picks`, `teams` i snapshots relacionats dels participants
+- reescriu l'ordre del draft i carrega els picks importats
