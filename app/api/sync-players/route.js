@@ -99,15 +99,33 @@ async function doSync() {
             posicion: normalizeText(p.posicion, '-'),
         }))
 
+    const jugadorsDescartats = (previousPlayers || [])
+        .filter((p) => !currentIdSet.has(Number(p.id)))
+        .map((p) => ({
+            id: Number(p.id),
+            nombre: normalizeText(p.nombre, `Jugador ${p.id}`),
+            posicion: normalizeText(p.posicion, 'Migcampista'),
+            equipo_real: 'Transferits',
+            valor: Number(p.valor ?? calcValor(Number(p.precio || 0))),
+            precio: Number(p.precio || 0),
+            punts_totals: Number(p.punts_totals || 0),
+            status: 'discarded',
+            status_info: 'No present a la font oficial actual',
+            foto: p.foto || null,
+            escudo_equip: p.escudo_equip || null,
+        }))
+
+    const jugadorsFinals = [...jugadors, ...jugadorsDescartats]
+
     // Upsert — usa 'id' com a clau de conflicte
     const { error } = await supabaseAdmin
         .from('players')
-        .upsert(jugadors, { onConflict: 'id' })
+        .upsert(jugadorsFinals, { onConflict: 'id' })
 
     if (error) {
         // Backward compatibility: if status_info column does not exist yet, sync still works.
         if (String(error.message || '').toLowerCase().includes('status_info')) {
-            const jugadorsFallback = jugadors.map(({ status_info, ...rest }) => rest)
+            const jugadorsFallback = jugadorsFinals.map(({ status_info, ...rest }) => rest)
             const { error: fallbackError } = await supabaseAdmin
                 .from('players')
                 .upsert(jugadorsFallback, { onConflict: 'id' })
@@ -117,23 +135,7 @@ async function doSync() {
         }
     }
 
-    // Sincronització estricta: la taula local ha de reflectir exactament la font oficial.
-    const { data: totsPlayers, error: errPlayers } = await supabaseAdmin.from('players').select('id')
-    if (errPlayers) throw new Error(errPlayers.message)
-
-    const idsBorrar = (totsPlayers || [])
-        .map((p) => Number(p.id))
-        .filter((id) => Number.isInteger(id) && !currentIdSet.has(id))
-
-    if (idsBorrar.length) {
-        const { error: deleteError } = await supabaseAdmin
-            .from('players')
-            .delete()
-            .in('id', idsBorrar)
-        if (deleteError) throw new Error(deleteError.message)
-    }
-
-    return { total: jugadors.length, eliminats: idsBorrar.length, altes, baixes }
+    return { total: jugadors.length, eliminats: jugadorsDescartats.length, altes, baixes }
 }
 
 export async function POST(request) {
@@ -149,7 +151,7 @@ export async function POST(request) {
             eliminats: result.eliminats,
             altes: result.altes,
             baixes: result.baixes,
-            message: `${result.total} jugadors actius sincronitzats · ${result.eliminats} obsolets eliminats`
+            message: `${result.total} jugadors actius sincronitzats · ${result.eliminats} obsolets marcats com a descartats`
         })
     } catch (err) {
         return Response.json({ error: err.message }, { status: 500 })
@@ -170,7 +172,7 @@ export async function GET(request) {
             eliminats: result.eliminats,
             altes: result.altes,
             baixes: result.baixes,
-            message: `Cron: ${result.total} actius · ${result.eliminats} eliminats`
+            message: `Cron: ${result.total} actius · ${result.eliminats} descartats`
         })
     } catch (err) {
         return Response.json({ error: err.message }, { status: 500 })

@@ -206,6 +206,7 @@ export default function Canvis() {
     const meusJugadors = players.filter(p => meusPickIds.has(p.id))
     const disponibles  = players.filter(p => {
         if (pickIds.has(p.id)) return false
+        if (p.status === 'discarded') return false
         if (playerOut && p.posicion !== playerOut.posicion) return false
         const okC = cerca === '' || p.nombre.toLowerCase().includes(cerca.toLowerCase()) ||
             (p.equipo_real || '').toLowerCase().includes(cerca.toLowerCase())

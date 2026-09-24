@@ -59,7 +59,7 @@ export async function GET(request) {
       return Response.json({ ok: false, error: 'La font oficial no ha retornat cap jugador vàlid' }, { status: 502 })
     }
 
-    const puntsMapa = Object.fromEntries(players.map((player) => [player.id, 0]))
+    const puntsMapa = Object.fromEntries(players.map((player) => [player.id, null]))
     const unmatched = []
     const matchedRows = []
 
@@ -98,7 +98,8 @@ export async function GET(request) {
     const files = Object.entries(puntsMapa).map(([player_id, puntsAcumulats]) => {
       const key = String(player_id)
       const acumulatAnterior = Number(acumulatAnteriorPerPlayer[key] || 0)
-      const puntsJornada = Number(puntsAcumulats || 0) - acumulatAnterior
+      const acumulatActual = puntsAcumulats === null ? acumulatAnterior : Number(puntsAcumulats || 0)
+      const puntsJornada = acumulatActual - acumulatAnterior
       return {
         player_id: Number(player_id),
         jornada,
@@ -154,6 +155,7 @@ export async function GET(request) {
     return Response.json({ ok: false, error: error?.message || 'Error important punts des de FutbolFantasy oficial' }, { status: 500 })
   }
 }
+
 
 
 

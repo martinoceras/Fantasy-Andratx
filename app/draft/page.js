@@ -298,11 +298,12 @@ export default function Draft() {
 
     const jugadorsFiltrats = players
         .filter(p => {
+            const okActiu = p.status !== 'discarded'
             const okCerca = cerca === '' || p.nombre.toLowerCase().includes(cerca.toLowerCase()) ||
                 (p.equipo_real || '').toLowerCase().includes(cerca.toLowerCase())
             const okPos = posicioFiltro === 'Tots' || p.posicion === posicioFiltro
             const okEquip = equipsFiltro.length === 0 || equipsFiltro.includes(p.equipo_real)
-            return okCerca && okPos && okEquip
+            return okActiu && okCerca && okPos && okEquip
         })
         .sort((a, b) => {
             if (ordenar === 'preu')  return (b.precio || 0) - (a.precio || 0)

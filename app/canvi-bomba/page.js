@@ -74,7 +74,7 @@ export default function CanviBomba() {
             equipo_real: p.equipo_real === 'Desconegut' ? 'Transferits' : p.equipo_real,
         }))
         const meus = normalitzats.filter(p => myPickIds.has(p.id))
-        const disp = normalitzats.filter(p => !allPickIds.has(p.id))
+        const disp = normalitzats.filter(p => !allPickIds.has(p.id) && p.status !== 'discarded')
         setMeusPicks(meus)
         setJugadorsDisponibles(disp)
 
