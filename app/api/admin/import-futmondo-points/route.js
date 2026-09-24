@@ -151,6 +151,48 @@ export async function GET(request) {
       return Response.json({ ok: false, error: 'No s\'ha pogut detectar la temporada oficial de FutbolFantasy' }, { status: 502 })
     }
 
+    const { data: importLogRows, error: importLogError } = await supabaseAdmin
+      .from('gameweek_points_import_log')
+      .select('jornada, source')
+
+    if (importLogError) {
+      const msg = String(importLogError.message || '').toLowerCase()
+      if (!msg.includes('schema cache') && !msg.includes('could not find the table')) {
+        return Response.json({ ok: false, error: importLogError.message }, { status: 500 })
+      }
+    }
+
+    const importedJornadesSet = new Set(
+      (importLogRows || [])
+        .filter((row) => !row?.source || String(row.source).includes('futbolfantasy'))
+        .map((row) => Number(row.jornada))
+        .filter((jornadaItem) => Number.isInteger(jornadaItem) && jornadaItem > 0)
+    )
+    const maxImportedJornada = importedJornadesSet.size > 0 ? Math.max(...importedJornadesSet) : 0
+
+    if (jornada <= maxImportedJornada) {
+      return Response.json({
+        ok: true,
+        message: `No hi ha jornades noves per importar. Ja tens fins la J${maxImportedJornada}.`,
+        seasonId,
+        jornada,
+        saved: 0,
+        matched: 0,
+        playersWithDetail: 0,
+        importedJornades: [],
+        skippedJornades: [...importedJornadesSet].sort((a, b) => a - b),
+        totalRows: rows.length,
+        totalPlayers: players.length,
+        defaultedToZero: 0,
+        unmatched: 0,
+        unmatchedSample: [],
+        detailErrors: 0,
+        detailErrorsSample: [],
+        puntsMapa: Object.fromEntries(players.map((player) => [player.id, 0])),
+        matchedRows: [],
+      }, { headers: { 'Cache-Control': 'no-store' } })
+    }
+
     const puntsMapa = Object.fromEntries(players.map((player) => [player.id, 0]))
     const unmatched = []
     const matchedRows = []
@@ -200,6 +242,7 @@ export async function GET(request) {
     const jornadesImportades = new Set()
     for (const result of detailResults) {
       for (const detailRow of result.detailRows || []) {
+        if (Number(detailRow.jornada) <= maxImportedJornada) continue
         const key = `${result.playerId}:${detailRow.jornada}`
         filesMap.set(key, {
           player_id: Number(result.playerId),
@@ -214,10 +257,24 @@ export async function GET(request) {
 
     if (!files.length) {
       return Response.json({
-        ok: false,
-        error: detailErrors[0]?.error || 'No s\'ha pogut importar cap puntuació per jornada',
-        detailErrors: detailErrors.slice(0, 20),
-      }, { status: 502 })
+        ok: true,
+        message: 'No hi ha jornades noves per importar.',
+        seasonId,
+        jornada,
+        saved: 0,
+        matched: matchedRows.length,
+        playersWithDetail: detailResults.filter((item) => (item.detailRows || []).length > 0).length,
+        importedJornades: [],
+        totalRows: rows.length,
+        totalPlayers: players.length,
+        defaultedToZero: 0,
+        unmatched: unmatched.length,
+        unmatchedSample: unmatched.slice(0, 20),
+        detailErrors: detailErrors.length,
+        detailErrorsSample: detailErrors.slice(0, 20),
+        puntsMapa,
+        matchedRows,
+      }, { status: 200 })
     }
 
     const { error: puntsError } = await supabaseAdmin
@@ -259,9 +316,10 @@ export async function GET(request) {
       matched: matchedRows.length,
       playersWithDetail: detailResults.filter((item) => (item.detailRows || []).length > 0).length,
       importedJornades: [...jornadesImportades].sort((a, b) => a - b),
+      skippedJornades: [...importedJornadesSet].sort((a, b) => a - b),
       totalRows: rows.length,
       totalPlayers: players.length,
-      defaultedToZero: Math.max(0, players.length - detailResults.filter((item) => (item.detailRows || []).some((detailRow) => detailRow.jornada === jornada)).length),
+      defaultedToZero: Math.max(0, players.length - detailResults.filter((item) => (item.detailRows || []).some((detailRow) => detailRow.jornada === jornada && detailRow.jornada > maxImportedJornada)).length),
       unmatched: unmatched.length,
       unmatchedSample: unmatched.slice(0, 20),
       detailErrors: detailErrors.length,
@@ -275,6 +333,9 @@ export async function GET(request) {
     return Response.json({ ok: false, error: error?.message || 'Error important punts des de FutbolFantasy oficial' }, { status: 500 })
   }
 }
+
+
+
 
 
 

@@ -603,6 +603,10 @@ export default function Admin() {
                 return
             }
 
+            if (data.message) {
+                setMissatgePunts(data.message)
+            }
+
             const mapa = data.puntsMapa || {}
             const jornadaImportada = Number(data.jornada) || jornadaPunts
             setPuntsMapa(mapa)
