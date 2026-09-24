@@ -10,6 +10,20 @@ const supabaseAdmin = createClient(
 
 const TEMPORADA = '2026-27'
 const FORMACIO_DEFAULT = '4-4-2'
+
+function fallbackNomEquip(perfil) {
+    const nom = String(perfil?.nom || '').trim()
+    if (nom) return nom
+
+    const email = String(perfil?.email || '').trim()
+    if (email) {
+        const localPart = email.split('@')[0]?.replace(/[._-]+/g, ' ')?.trim()
+        if (localPart) return localPart
+        return email
+    }
+
+    return 'El meu equip'
+}
 const FORMACIONS = {
     '4-4-2':  { Porter: 1, Defensa: 4, Migcampista: 4, Davanter: 2 },
     '4-3-3':  { Porter: 1, Defensa: 4, Migcampista: 3, Davanter: 3 },
@@ -253,9 +267,11 @@ export async function GET(request) {
             const roster = rosterByUser.get(userId) || []
             if (roster.length === 0) continue
             const generated = autoOmplirDesdePlantilla(roster, FORMACIO_DEFAULT)
+            const perfil = perfilById.get(userId)
             const payload = {
                 user_id: userId,
                 temporada: TEMPORADA,
+                nombre_equipo: fallbackNomEquip(perfil),
                 formacio: generated.formacio,
                 alineacio: generated.alineacio,
                 suplents: generated.suplents,

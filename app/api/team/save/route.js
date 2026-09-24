@@ -32,6 +32,25 @@ function normalitzarObjecte(data) {
     )
 }
 
+function normalitzarNomEquip(value) {
+    const nom = String(value || '').trim()
+    return nom || null
+}
+
+function fallbackNomEquip(profile, user) {
+    const fromProfile = normalitzarNomEquip(profile?.nom)
+    if (fromProfile) return fromProfile
+
+    const email = String(profile?.email || user?.email || '').trim()
+    if (email) {
+        const localPart = email.split('@')[0]?.replace(/[._-]+/g, ' ')?.trim()
+        if (localPart) return localPart
+        return email
+    }
+
+    return 'El meu equip'
+}
+
 async function mirrorToActiveGameweek({ origin, payload }) {
     if (!origin) return
 
@@ -81,17 +100,11 @@ export async function POST(request) {
 
         const body = await request.json().catch(() => ({}))
         const temporada = body?.temporada || TEMPORADA_DEFAULT
-        const payload = {
-            user_id: userData.user.id,
-            temporada,
-            formacio: body?.formacio || '4-4-2',
-            alineacio: normalitzarObjecte(body?.alineacio),
-            suplents: normalitzarObjecte(body?.suplents),
-        }
+        const requestedTeamName = normalitzarNomEquip(body?.nombre_equipo)
 
         const { data: existent, error: errSelect } = await supabaseAdmin
             .from('teams')
-            .select('user_id')
+            .select('user_id, nombre_equipo')
             .eq('user_id', userData.user.id)
             .eq('temporada', temporada)
             .limit(1)
@@ -100,13 +113,35 @@ export async function POST(request) {
             return Response.json({ ok: false, error: errSelect.message }, { status: 500 })
         }
 
-        if (Array.isArray(existent) && existent.length > 0) {
+        const existentTeam = Array.isArray(existent) && existent.length > 0 ? existent[0] : null
+
+        let nombreEquipo = requestedTeamName || normalitzarNomEquip(existentTeam?.nombre_equipo)
+        if (!nombreEquipo) {
+            const { data: profile } = await supabaseAdmin
+                .from('profiles')
+                .select('nom, email')
+                .eq('id', userData.user.id)
+                .maybeSingle()
+
+            nombreEquipo = fallbackNomEquip(profile, userData.user)
+        }
+
+        const payload = {
+            user_id: userData.user.id,
+            temporada,
+            nombre_equipo: nombreEquipo,
+            formacio: body?.formacio || '4-4-2',
+            alineacio: normalitzarObjecte(body?.alineacio),
+            suplents: normalitzarObjecte(body?.suplents),
+        }
+
+        if (existentTeam) {
             const { data: updated, error: errUpdate } = await supabaseAdmin
                 .from('teams')
                 .update(payload)
                 .eq('user_id', userData.user.id)
                 .eq('temporada', temporada)
-                .select('user_id, temporada, formacio, alineacio, suplents')
+                .select('user_id, temporada, nombre_equipo, formacio, alineacio, suplents')
                 .limit(1)
 
             if (errUpdate) {
@@ -121,7 +156,7 @@ export async function POST(request) {
         const { data: inserted, error: errInsert } = await supabaseAdmin
             .from('teams')
             .insert(payload)
-            .select('user_id, temporada, formacio, alineacio, suplents')
+            .select('user_id, temporada, nombre_equipo, formacio, alineacio, suplents')
             .limit(1)
 
         if (errInsert) {
@@ -135,6 +170,7 @@ export async function POST(request) {
         return Response.json({ ok: false, error: error?.message || 'Error desant equip' }, { status: 500 })
     }
 }
+
 
 
 

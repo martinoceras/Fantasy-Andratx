@@ -39,7 +39,7 @@ export async function GET(request) {
 
         const { data, error } = await supabaseAdmin
             .from('teams')
-            .select('user_id, temporada, formacio, alineacio, suplents')
+            .select('user_id, temporada, nombre_equipo, formacio, alineacio, suplents')
             .eq('user_id', userData.user.id)
             .eq('temporada', temporada)
             .limit(1)
@@ -53,4 +53,5 @@ export async function GET(request) {
         return Response.json({ ok: false, error: error?.message || 'Error carregant equip' }, { status: 500 })
     }
 }
+
 
