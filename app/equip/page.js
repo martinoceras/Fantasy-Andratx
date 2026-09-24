@@ -386,25 +386,7 @@ export default function Equip() {
             alert('JORNADA EN JOC: la teva alineació està bloquejada fins que acabi la jornada.')
             return
         }
-        const nova = FORMACIONS[novaFormacio]
-        const actual = FORMACIONS[formacio]
-
-        // Mantenim titulars que segueixen tenint slot a la nova formació
-        const nousTitulars = {}
-        const posicions = ['Porter', 'Defensa', 'Migcampista', 'Davanter']
-
-        posicions.forEach(pos => {
-            const slotsNous = nova[pos] || 0
-            const slotsActuals = actual[pos] || 0
-            // Mantenim fins al mínim de slots entre les dues formacions
-            const slotsAMantenir = Math.min(slotsNous, slotsActuals)
-            for (let i = 0; i < slotsAMantenir; i++) {
-                const key = `${pos}_${i}`
-                if (titulars[key]) nousTitulars[key] = titulars[key]
-            }
-        })
-
-        const { nousSuplents } = autoOmplirPlantilla(jugadors, novaFormacio, nousTitulars, suplents)
+        const { nousTitulars, nousSuplents } = autoOmplirPlantilla(jugadors, novaFormacio, titulars, suplents)
         setFormacio(novaFormacio)
         setTitulars(nousTitulars)
         setSuplents(nousSuplents)
