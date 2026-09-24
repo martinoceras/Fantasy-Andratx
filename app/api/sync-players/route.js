@@ -1,4 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
+import {
+    FUTBOLFANTASY_OFFICIAL_POINTS_URL,
+    extractOfficialPlayerRows,
+    createOfficialPlayerMatcher,
+    allocateSyntheticLocalId,
+} from '../../../lib/futbolfantasyAnalytics.js'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -7,12 +13,6 @@ const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
 )
-
-const BIWENGER_URL  = 'https://cf.biwenger.com/api/v2/competitions/la-liga/data?lang=ca&score=2'
-const FOTO_BASE     = 'https://cdn.biwenger.com/i/p/'   // + id + .png
-const ESCUDO_BASE   = 'https://biwenger.as.com/res/images/clubs/badge_'    // + teamId + .png
-
-const POS_MAP = { 1: 'Porter', 2: 'Defensa', 3: 'Migcampista', 4: 'Davanter' }
 
 function normalizeText(value, fallback = '') {
     const text = typeof value === 'string' ? value.trim() : ''
@@ -34,57 +34,54 @@ function calcValor(price) {
 }
 
 async function doSync() {
-    const url = `${BIWENGER_URL}&_ts=${Date.now()}`
+    const url = `${FUTBOLFANTASY_OFFICIAL_POINTS_URL}?_ts=${Date.now()}`
     const res = await fetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         cache: 'no-store'
     })
-    if (!res.ok) throw new Error(`Biwenger API error: ${res.status}`)
-    const json = await res.json()
+    if (!res.ok) throw new Error(`FutbolFantasy oficial error: ${res.status}`)
+    const html = await res.text()
+    const sourceRows = extractOfficialPlayerRows(html)
 
-    const teamsRaw   = json.data?.teams   || {}
-    const playersRaw = json.data?.players || {}
-
-    if (!Object.keys(teamsRaw).length || !Object.keys(playersRaw).length) {
-        throw new Error('Resposta de Biwenger incompleta: sense equips o jugadors')
+    if (!sourceRows.length) {
+        throw new Error('Resposta de FutbolFantasy incompleta: sense jugadors vàlids')
     }
 
     const { data: previousPlayers, error: previousError } = await supabaseAdmin
         .from('players')
-        .select('id, nombre, equipo_real, posicion')
+        .select('id, nombre, equipo_real, posicion, valor, precio, punts_totals, status, status_info, foto, escudo_equip')
     if (previousError) throw new Error(previousError.message)
 
-    // Mapa equips id → nom
-    const teamNames = {}
-    Object.values(teamsRaw).forEach(t => {
-        if (!t?.id) return
-        teamNames[t.id] = normalizeText(t.name, 'Desconegut')
+    const matcher = createOfficialPlayerMatcher(previousPlayers || [])
+    const usedIds = new Set()
+    const jugadors = sourceRows.map((row) => {
+        const previous = matcher.matchRow(row, usedIds)
+        const localId = previous
+            ? Number(previous.id)
+            : allocateSyntheticLocalId(row.sourceId, usedIds)
+
+        usedIds.add(localId)
+
+        const precio = Number(previous?.precio || 0)
+        const valor = Number(previous?.valor ?? calcValor(precio))
+
+        return {
+            id: localId,
+            nombre: normalizeText(row.nombre, previous?.nombre || `Jugador ${localId}`),
+            posicion: row.posicion || normalizeText(previous?.posicion, 'Migcampista'),
+            equipo_real: normalizeText(row.equipoReal, previous?.equipo_real || 'Desconegut'),
+            valor: Number.isFinite(valor) ? valor : calcValor(precio),
+            precio,
+            punts_totals: Number(row.puntsTotals || 0),
+            status: typeof previous?.status === 'string' ? previous.status : 'ok',
+            status_info: optionalText(previous?.status_info),
+            foto: row.foto || previous?.foto || null,
+            escudo_equip: row.escudoEquip || previous?.escudo_equip || null,
+        }
     })
 
-    // Mapeig jugadors — camps correctes: team (no teamID), price (no fantasyPrice)
-    const jugadors = Object.values(playersRaw)
-        .filter(p => POS_MAP[p?.position] && Number.isInteger(Number(p?.id)))
-        .map(p => {
-            // El camp equip pot venir com a p.team o p.teamID
-            const teamId = p.team ?? p.teamID ?? null
-            return {
-                id:            Number(p.id),
-                nombre:        normalizeText(p.name, `Jugador ${p.id}`),
-                posicion:      POS_MAP[p.position],
-                equipo_real:   teamNames[teamId] || normalizeText(p.teamName, 'Transferits'),
-                valor:         calcValor(p.price ?? p.fantasyPrice),
-                precio:        p.price ?? p.fantasyPrice ?? 0,
-                punts_totals:  p.points ?? 0,
-                status:        typeof p.status === 'string' ? p.status : 'ok',
-                status_info:   optionalText(p.statusInfo),
-                // Foto principal via CDN actual.
-                foto:          `${FOTO_BASE}${p.id}.png`,
-                escudo_equip:  teamId ? `${ESCUDO_BASE}${teamId}.png` : null,
-            }
-        })
-
     if (!jugadors.length) {
-        throw new Error('Biwenger no ha retornat jugadors vàlids')
+        throw new Error('FutbolFantasy no ha retornat jugadors vàlids')
     }
 
     const previousById = new Map((previousPlayers || []).map((p) => [Number(p.id), p]))
@@ -120,7 +117,7 @@ async function doSync() {
         }
     }
 
-    // Sincronització estricta: la taula local ha de reflectir exactament Biwenger
+    // Sincronització estricta: la taula local ha de reflectir exactament la font oficial.
     const { data: totsPlayers, error: errPlayers } = await supabaseAdmin.from('players').select('id')
     if (errPlayers) throw new Error(errPlayers.message)
 

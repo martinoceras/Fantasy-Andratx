@@ -1,10 +1,12 @@
 import { createClient } from '@supabase/supabase-js'
+import {
+  FUTBOLFANTASY_OFFICIAL_POINTS_URL,
+  extractOfficialPlayerRows,
+  createOfficialPlayerMatcher,
+} from '../../../../lib/futbolfantasyAnalytics.js'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
-
-const FUTBOLFANTASY_URL = 'https://www.futbolfantasy.com/laliga/estadisticas-puntos/jugador'
-const TARGET_COLUMN_LABEL = 'Puntos Futmondo (Prensa)'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -23,143 +25,6 @@ async function getActiveJornada(origin) {
   return 1
 }
 
-function stripHtml(html = '') {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeText(value = '') {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function parseNumber(value) {
-  const cleaned = String(value ?? '')
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .replace(/[^0-9.-]/g, '')
-  if (!cleaned) return null
-  const num = Number(cleaned)
-  return Number.isFinite(num) ? num : null
-}
-
-function extractTableSection(html, tagName) {
-  const match = html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'))
-  return match?.[1] || ''
-}
-
-function extractRows(sectionHtml = '') {
-  return [...sectionHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((m) => m[1])
-}
-
-function extractCells(rowHtml = '') {
-  return [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) => m[1])
-}
-
-function buildPlayerAliases(player) {
-  const aliases = new Set()
-  const base = normalizeText(player?.nombre)
-  if (!base) return aliases
-
-  aliases.add(base)
-  const parts = base.split(' ').filter(Boolean)
-  if (parts.length >= 2) {
-    aliases.add(parts.slice(-2).join(' '))
-    aliases.add(parts.slice(0, 2).join(' '))
-    aliases.add(parts[0])
-    aliases.add(parts[parts.length - 1])
-  }
-  if (parts.length >= 3) {
-    aliases.add(parts.slice(-3).join(' '))
-  }
-  return aliases
-}
-
-function scoreCandidate(player, normalizedRow, rowTokens) {
-  const normalizedPlayer = normalizeText(player?.nombre)
-  if (!normalizedPlayer) return -1
-  if (normalizedPlayer === normalizedRow) return 1000
-
-  const playerTokens = normalizedPlayer.split(' ').filter(Boolean)
-  const rowTokenSet = new Set(rowTokens)
-  const shared = playerTokens.filter((token) => rowTokenSet.has(token)).length
-  const exactLastName = playerTokens[playerTokens.length - 1] && playerTokens[playerTokens.length - 1] === rowTokens[rowTokens.length - 1]
-  const includes = normalizedPlayer.includes(normalizedRow) || normalizedRow.includes(normalizedPlayer)
-
-  return (shared * 10) + (exactLastName ? 5 : 0) + (includes ? 3 : 0)
-}
-
-function findBestPlayer(players, aliasMap, rowName) {
-  const normalizedRow = normalizeText(rowName)
-  if (!normalizedRow) return null
-
-  const directMatches = aliasMap.get(normalizedRow) || []
-  if (directMatches.length === 1) return directMatches[0]
-  if (directMatches.length > 1) {
-    const exact = directMatches.find((player) => normalizeText(player?.nombre) === normalizedRow)
-    if (exact) return exact
-  }
-
-  const rowTokens = normalizedRow.split(' ').filter(Boolean)
-  let best = null
-  let bestScore = 0
-  let tie = false
-
-  for (const player of players) {
-    const score = scoreCandidate(player, normalizedRow, rowTokens)
-    if (score > bestScore) {
-      best = player
-      bestScore = score
-      tie = false
-    } else if (score === bestScore && score > 0) {
-      tie = true
-    }
-  }
-
-  if (!best || bestScore < 10 || tie) return null
-  return best
-}
-
-function parseFutbolFantasyRows(html) {
-  const thead = extractTableSection(html, 'thead')
-  const tbody = extractTableSection(html, 'tbody')
-  const headerRow = extractRows(thead)[0] || ''
-  const headerCells = extractCells(headerRow)
-  const targetIndex = headerCells.findIndex((cell) => {
-    const htmlNormalized = normalizeText(cell)
-    const textNormalized = normalizeText(stripHtml(cell))
-    return htmlNormalized.includes(normalizeText(TARGET_COLUMN_LABEL)) || textNormalized === 'ptos fp'
-  })
-
-  if (targetIndex < 0) {
-    throw new Error('No s\'ha trobat la columna de punts Futmondo (Prensa)')
-  }
-
-  return extractRows(tbody)
-    .map((row) => extractCells(row))
-    .filter((cells) => cells.length > targetIndex)
-    .map((cells) => ({
-      nom: stripHtml(cells[0]),
-      punts: parseNumber(stripHtml(cells[targetIndex])),
-    }))
-    .filter((row) => row.nom && row.punts !== null)
-}
-
 export async function GET(request) {
   try {
     const reqUrl = new URL(request.url)
@@ -169,15 +34,15 @@ export async function GET(request) {
       : await getActiveJornada(reqUrl.origin)
 
     const [pageRes, playersRes] = await Promise.all([
-      fetch(FUTBOLFANTASY_URL, {
+      fetch(FUTBOLFANTASY_OFFICIAL_POINTS_URL, {
         cache: 'no-store',
         headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'text/html,application/xhtml+xml' },
       }),
-      supabaseAdmin.from('players').select('id, nombre, posicion, equipo_real').order('nombre'),
+      supabaseAdmin.from('players').select('id, nombre, posicion, equipo_real, foto').order('nombre'),
     ])
 
     if (!pageRes.ok) {
-      return Response.json({ ok: false, error: `Error carregant FutbolFantasy (${pageRes.status})` }, { status: 502 })
+      return Response.json({ ok: false, error: `Error carregant FutbolFantasy oficial (${pageRes.status})` }, { status: 502 })
     }
 
     if (playersRes.error) {
@@ -185,16 +50,13 @@ export async function GET(request) {
     }
 
     const html = await pageRes.text()
-    const rows = parseFutbolFantasyRows(html)
+    const rows = extractOfficialPlayerRows(html)
     const players = playersRes.data || []
-    const aliasMap = new Map()
+    const matcher = createOfficialPlayerMatcher(players)
+    const usedIds = new Set()
 
-    for (const player of players) {
-      for (const alias of buildPlayerAliases(player)) {
-        const list = aliasMap.get(alias) || []
-        list.push(player)
-        aliasMap.set(alias, list)
-      }
+    if (!rows.length) {
+      return Response.json({ ok: false, error: 'La font oficial no ha retornat cap jugador vàlid' }, { status: 502 })
     }
 
     const puntsMapa = Object.fromEntries(players.map((player) => [player.id, 0]))
@@ -202,13 +64,20 @@ export async function GET(request) {
     const matchedRows = []
 
     for (const row of rows) {
-      const player = findBestPlayer(players, aliasMap, row.nom)
+      const player = matcher.matchRow(row, usedIds)
       if (!player) {
-        unmatched.push(row.nom)
+        unmatched.push(`${row.nombre}${row.equipoReal ? ` (${row.equipoReal})` : ''}`)
         continue
       }
-      puntsMapa[player.id] = row.punts
-      matchedRows.push({ playerId: player.id, nom: player.nombre, punts: row.punts, source: row.nom })
+      usedIds.add(Number(player.id))
+      puntsMapa[player.id] = Number(row.puntsTotals || 0)
+      matchedRows.push({
+        playerId: player.id,
+        nom: player.nombre,
+        punts: Number(row.puntsTotals || 0),
+        source: row.nombre,
+        sourceId: row.sourceId,
+      })
     }
 
     // FutbolFantasy exposa punts acumulats de temporada. Per guardar punts de jornada,
@@ -252,8 +121,8 @@ export async function GET(request) {
         .upsert({
           jornada,
           imported_at: importedAt,
-          imported_by: 'import-futmondo',
-          source: 'futbolfantasy',
+          imported_by: 'import-futbolfantasy-official',
+          source: 'futbolfantasy-official',
         }, { onConflict: 'jornada' })
 
       if (logError) {
@@ -265,8 +134,8 @@ export async function GET(request) {
 
     return Response.json({
       ok: true,
-      source: 'futbolfantasy',
-      column: TARGET_COLUMN_LABEL,
+      source: 'futbolfantasy-official',
+      column: 'Punts totals Futmondo Prensa',
       jornada,
       importedAt,
       saved: files.length,
@@ -282,9 +151,11 @@ export async function GET(request) {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
-    return Response.json({ ok: false, error: error?.message || 'Error important punts Futmondo' }, { status: 500 })
+    return Response.json({ ok: false, error: error?.message || 'Error important punts des de FutbolFantasy oficial' }, { status: 500 })
   }
 }
+
+
 
 
 

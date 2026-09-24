@@ -597,7 +597,7 @@ export default function Admin() {
             const res = await fetch('/api/admin/import-futmondo-points', { cache: 'no-store' })
             const data = await res.json().catch(() => ({}))
             if (!res.ok || !data?.ok) {
-                setMissatgePunts(`❌ Error important punts Futmondo: ${data?.error || 'Resposta invàlida'}`)
+                setMissatgePunts(`❌ Error important punts oficials: ${data?.error || 'Resposta invàlida'}`)
                 return
             }
 
@@ -612,10 +612,10 @@ export default function Admin() {
             const unmatched = Number(data.unmatched || 0)
             const zeros = Number(data.defaultedToZero || 0)
             setMissatgePunts(
-                `✅ Futmondo (Jornada ${data.jornada || jornadaPunts}): ${data.matched || 0} jugadors desats a la BD${data.importedAt ? ` · última importació ${new Intl.DateTimeFormat('ca-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(data.importedAt))}` : ''}${zeros ? ` · ${zeros} amb 0 pts` : ''}${unmatched ? ` · ${unmatched} sense encaix` : ''}`
+                `✅ FutbolFantasy oficial (Jornada ${data.jornada || jornadaPunts}): ${data.matched || 0} jugadors desats a la BD${data.importedAt ? ` · última importació ${new Intl.DateTimeFormat('ca-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(data.importedAt))}` : ''}${zeros ? ` · ${zeros} amb 0 pts` : ''}${unmatched ? ` · ${unmatched} sense encaix` : ''}`
             )
         } catch (error) {
-            setMissatgePunts(`❌ Error important punts Futmondo: ${error.message}`)
+            setMissatgePunts(`❌ Error important punts oficials: ${error.message}`)
         } finally {
             setImportantFutmondo(false)
             setTimeout(() => setMissatgePunts(''), 8000)
@@ -1270,14 +1270,14 @@ export default function Admin() {
                             <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                                 <div>
                                     <p className="text-white font-semibold">Punts Jornada {jornadaPunts}</p>
-                                    <p className="text-gray-500 text-xs mt-1">Pots omplir manualment o carregar els valors de Futmondo (Prensa) al panell.</p>
+                                    <p className="text-gray-500 text-xs mt-1">Pots omplir manualment o carregar els valors oficials de FutbolFantasy Analytics (Futmondo Prensa).</p>
                                 </div>
                                 <button
                                     onClick={importarPuntsFutmondo}
                                     disabled={importantFutmondo || desantPunts}
                                     className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
                                 >
-                                    {importantFutmondo ? 'Important Futmondo...' : '📥 Importar Futmondo (Prensa)'}
+                                    {importantFutmondo ? 'Important FutbolFantasy...' : '📥 Importar FutbolFantasy oficial'}
                                 </button>
                             </div>
                             {players.length === 0 ? (
@@ -1324,7 +1324,7 @@ export default function Admin() {
                     <div>
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-4">
                             <h2 className="text-white font-semibold text-lg mb-2">🔄 Sincronitzar jugadors de LaLiga</h2>
-                            <p className="text-gray-400 text-sm mb-1">Importa tots els jugadors de Primera Divisió des de <span className="text-green-400 font-mono">Biwenger</span> amb els seus preus, posicions i punts actuals.</p>
+                            <p className="text-gray-400 text-sm mb-1">Importa tots els jugadors de Primera Divisió des de <span className="text-green-400 font-mono">FutbolFantasy Analytics</span> amb les seves posicions, punts oficials i fitxes actualitzades.</p>
                             <p className="text-gray-500 text-xs mb-5">S&apos;actualitza automàticament cada nit a les 4:00 AM. Pots forçar la sincronització ara prement el botó.</p>
 
                             {missatgeSync && (
@@ -1388,11 +1388,11 @@ export default function Admin() {
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
                             <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-2">Com funciona la sincronització</p>
                             <ul className="text-gray-400 text-sm space-y-1.5">
-                                <li>📥 Descarrega tots els jugadors de LaLiga des de Biwenger API</li>
-                                <li>🗂️ Mapeja posicions, preus de mercat i punts acumulats</li>
+                                <li>📥 Descarrega tots els jugadors de LaLiga des de FutbolFantasy Analytics / Futmondo Prensa</li>
+                                <li>🗂️ Mapeja posicions oficials, escuts, fotos i punts acumulats</li>
                                 <li>💾 Fa un upsert a Supabase (actualitza si ja existeix, crea si no)</li>
                                 <li>⏰ El cron de Vercel ho executa automàticament cada nit a les 4:00 AM</li>
-                                <li>✅ Fitxatges i canvis de preu es reflecteixen l&apos;endemà automàticament</li>
+                                <li>✅ Altes, baixes i canvis de posició es reflecteixen automàticament</li>
                             </ul>
                         </div>
                     </div>
